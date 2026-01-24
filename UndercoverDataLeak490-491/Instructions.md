@@ -22,5 +22,3 @@ Which Scripts go where:
 
 the src folder has server for server scripts ending with .server.luau , client scripts ending with client.luau and .luau for shared 
 
-
-Models can either be created or can be used from the marketplace
