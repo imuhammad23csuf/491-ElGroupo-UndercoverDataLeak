@@ -1,24 +1,102 @@
+# Rojo Setup & Usage Instructions
 
-How to use Rojo:
+This document explains how to install Rojo, connect it to Roblox Studio, and properly organize scripts in the project.
 
-Download Rojo and Roblox LSP from VS Code Extensions
+---
 
-VS Instructions:
+## Prerequisites
 
-Ctrl+ Shift+ P 
+- Visual Studio Code
+- Roblox Studio
+- A Roblox experience created and opened in Roblox Studio
 
-Click Rojo: Open Menu
+---
 
-Click Install Rojo and Install Roblox Studio Plugin 
+## Installing Rojo & Roblox LSP
 
-Click add default.project.json
+1. Open **Visual Studio Code**
+2. Go to the **Extensions** tab
+3. Install the following extensions:
+   - **Rojo**
+   - **Roblox LSP**
 
-RBX Studio Instructions:
+---
 
-When prompted click connect
+## VS Code Instructions
+
+1. Open the Command Palette:
+
+Ctrl + Shift + P or Cmd + Shift + P
+
+2. Select:
+
+Rojo: Open Menu
 
 
-Which Scripts go where:
+3. Click the following options:
+- **Install Rojo**
+- **Install Roblox Studio Plugin**
 
-the src folder has server for server scripts ending with .server.luau , client scripts ending with client.luau and .luau for shared 
+4. In the Rojo menu, click:
 
+Add default.project.json
+
+
+This will generate a `default.project.json` file required for syncing with Roblox Studio.
+
+---
+
+## Roblox Studio Instructions
+
+1. Open **Roblox Studio**
+2. When prompted by the Rojo plugin, click:
+
+Connect
+
+
+3. Roblox Studio will now sync with the project in VS Code.
+
+---
+
+## Project Structure & Script Placement
+
+All scripts should be placed inside the `src` folder.
+
+### Script Types
+
+- **Server Scripts**
+- Location: `src/server`
+- File extension: `.server.luau`
+
+- **Client Scripts**
+- Location: `src/client`
+- File extension: `.client.luau`
+
+- **Shared Scripts / Modules**
+- Location: anywhere inside `src`
+- File extension: `.luau`
+
+---
+
+## Example Project Structure
+
+src/
+├── server/
+│ └── main.server.luau
+├── client/
+│ └── ui.client.luau
+└── shared/
+└── utils.luau
+
+
+---
+
+## Notes
+
+- Rojo automatically syncs files between VS Code and Roblox Studio while connected.
+- Ensure script file extensions are correct, or scripts may not run as expected.
+- Keep all Roblox-related code inside the `src` directory to avoid sync issues.
+
+---
+
+Happy developing 🚀
