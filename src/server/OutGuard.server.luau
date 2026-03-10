@@ -1,5 +1,4 @@
--- Simple Guard Script (Patrol + Chase + Walk Animation)
-
+-- GuardOutside (Patrol + Basic Chase + Batched Suspicion)
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,8 +17,47 @@ local VISION_RANGE = 80
 local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
 local CHASE_TIMEOUT = 10 -- seconds before giving up
 
+-- Suspicion tuning (Outside)
+local SUSPICION_TICK_SEEN = 2      -- add when actively seeing player (per tick)
+local SUSPICION_TICK_RATE = 0.2    -- matches chase tick wait
+
+-- === SUSPICION THROTTLE/BATCH ===
+local SUSPICION_PUSH_INTERVAL = 0.5 -- send at most 2x/sec
+local pendingSuspicion = {}         -- [userId] = accumulated delta
+
+local function queueSuspicion(player, amount)
+	if not player or not player.UserId then return end
+	local uid = player.UserId
+	pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+end
+
+local function flushSuspicion(player)
+	if not player or not player.UserId then return end
+	local uid = player.UserId
+	local delta = pendingSuspicion[uid] or 0
+	if delta > 0 then
+		SuspicionManager.Add(delta, player)
+		pendingSuspicion[uid] = 0
+	end
+end
+
+-- background flusher (flush all pending every interval)
+task.spawn(function()
+	while task.wait(SUSPICION_PUSH_INTERVAL) do
+		for uid, delta in pairs(pendingSuspicion) do
+			if delta and delta > 0 then
+				local ply = Players:GetPlayerByUserId(uid)
+				if ply then
+					SuspicionManager.Add(delta, ply)
+				end
+				pendingSuspicion[uid] = 0
+			end
+		end
+	end
+end)
+
 -- === WALK ANIMATION ===
-local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848" -- replace if needed
+local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848"
 local Animator = HUMANOID:FindFirstChildOfClass("Animator") or Instance.new("Animator", HUMANOID)
 local WalkTrack do
 	local anim = Instance.new("Animation")
@@ -34,8 +72,8 @@ local function stopWalk()
 	if WalkTrack and WalkTrack.IsPlaying then WalkTrack:Stop() end
 end
 
--- === PATROL POINTS (Original uses PatrolPoints1) ===
-local PatrolFolder = (RIG:FindFirstChild("PatrolPoints1") or GUARD:FindFirstChild("PatrolPoints1"))
+-- === PATROL POINTS ===
+local PatrolFolder = RIG:FindFirstChild("PatrolPoints") or GUARD:FindFirstChild("PatrolPoints")
 local Waypoints = {}
 if PatrolFolder then
 	for _, part in ipairs(PatrolFolder:GetChildren()) do
@@ -65,7 +103,7 @@ local function canSeePlayer(playerHRP)
 	params.FilterDescendantsInstances = {GUARD}
 	local ray = Workspace:Raycast(HRP.Position, dir * dist, params)
 	if not ray then return true end
-	local hitModel = ray.Instance:FindFirstAncestorOfClass("Model")
+	local hitModel = ray.Instance and ray.Instance:FindFirstAncestorOfClass("Model")
 	return hitModel and hitModel == playerHRP.Parent
 end
 
@@ -97,12 +135,9 @@ local function patrol()
 
 		-- Chase logic (basic chase + give up)
 		if nearestPlayer and nearestHRP then
-			SuspicionManager.Add(8, nearestPlayer)
-
 			HUMANOID.WalkSpeed = CHASE_SPEED
 			playWalk()
 			local startTime = os.clock()
-			local lastTick = 0
 
 			while os.clock() - startTime < CHASE_TIMEOUT do
 				local char = nearestPlayer.Character
@@ -110,14 +145,15 @@ local function patrol()
 				if not char or not safeAlive(hum) then break end
 				if not canSeePlayer(nearestHRP) then break end
 
-				if os.clock() - lastTick >= 1 then
-					SuspicionManager.Add(2, nearestPlayer)
-					lastTick = os.clock()
-				end
+				-- queue suspicion (batched)
+				queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
 
 				HUMANOID:MoveTo(nearestHRP.Position)
-				task.wait(0.2)
+				task.wait(SUSPICION_TICK_RATE)
 			end
+
+			-- flush any remaining suspicion so GUI updates responsively
+			flushSuspicion(nearestPlayer)
 
 			stopWalk()
 			HUMANOID.WalkSpeed = PATROL_SPEED
@@ -140,139 +176,4 @@ local function patrol()
 	end
 end
 
--- === CLONE (Uses PatrolPoints2 and walks 3->2->1) ===
-local GUARD2 = GUARD:Clone()
-GUARD2.Name = "GuardOutside_Clone"
-GUARD2.Parent = Workspace
-
-local RIG2 = GUARD2:WaitForChild("Rig")
-local HUMANOID2 = RIG2:WaitForChild("Humanoid")
-local HRP2 = RIG2:WaitForChild("HumanoidRootPart")
-
--- === SAFE SPAWN OFFSET ===
-local SPAWN_OFFSET = 10
-if HRP and HRP2 then
-	local rightVector = HRP.CFrame.RightVector
-	local offsetPosition = HRP.Position + (rightVector * SPAWN_OFFSET)
-	HRP2.CFrame = CFrame.new(offsetPosition, offsetPosition + HRP.CFrame.LookVector)
-end
-
-local Animator2 = HUMANOID2:FindFirstChildOfClass("Animator") or Instance.new("Animator", HUMANOID2)
-local WalkTrack2 do
-	local anim = Instance.new("Animation")
-	anim.AnimationId = WALK_ANIM_ID
-	WalkTrack2 = Animator2:LoadAnimation(anim)
-end
-
-local function playWalk2()
-	if WalkTrack2 and not WalkTrack2.IsPlaying then WalkTrack2:Play() end
-end
-local function stopWalk2()
-	if WalkTrack2 and WalkTrack2.IsPlaying then WalkTrack2:Stop() end
-end
-
--- Clone patrol points folder
-local PatrolFolder2 = (RIG2:FindFirstChild("PatrolPoints2") or GUARD2:FindFirstChild("PatrolPoints2"))
-local Waypoints2 = {}
-if PatrolFolder2 then
-	for _, part in ipairs(PatrolFolder2:GetChildren()) do
-		if part:IsA("BasePart") then table.insert(Waypoints2, part) end
-	end
-	table.sort(Waypoints2, function(a,b)
-		local na = tonumber(a.Name:match("%d+")) or math.huge
-		local nb = tonumber(b.Name:match("%d+")) or math.huge
-		return na < nb
-	end)
-end
-
-local currentPoint2 = #Waypoints2 > 0 and #Waypoints2 or 1
-
-local function canSeePlayer2(playerHRP)
-	if not HRP2 or not playerHRP then return false end
-	local diff = playerHRP.Position - HRP2.Position
-	local dist = diff.Magnitude
-	if dist > VISION_RANGE then return false end
-	local dir = diff.Unit
-	if HRP2.CFrame.LookVector:Dot(dir) < VISION_ANGLE then return false end
-
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Blacklist
-	params.FilterDescendantsInstances = {GUARD2}
-	local ray = Workspace:Raycast(HRP2.Position, dir * dist, params)
-	if not ray then return true end
-	local hitModel = ray.Instance:FindFirstAncestorOfClass("Model")
-	return hitModel and hitModel == playerHRP.Parent
-end
-
-local function moveTo2(pos)
-	if HUMANOID2 then
-		HUMANOID2:MoveTo(pos)
-		HUMANOID2.MoveToFinished:Wait()
-	end
-end
-
-local function patrol2()
-	while task.wait(0.2) do
-		-- Look for players
-		local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
-		for _, player in ipairs(Players:GetPlayers()) do
-			local char = player.Character
-			local hrp = char and char:FindFirstChild("HumanoidRootPart")
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			if hrp and safeAlive(hum) then
-				local dist = (hrp.Position - HRP2.Position).Magnitude
-				if dist < minDist and canSeePlayer2(hrp) then
-					minDist = dist
-					nearestPlayer = player
-					nearestHRP = hrp
-				end
-			end
-		end
-
-		-- Chase logic (basic chase + give up)
-		if nearestPlayer and nearestHRP then
-			SuspicionManager.Add(8, nearestPlayer)
-
-			HUMANOID2.WalkSpeed = CHASE_SPEED
-			playWalk2()
-			local startTime = os.clock()
-			local lastTick = 0
-
-			while os.clock() - startTime < CHASE_TIMEOUT do
-				local char = nearestPlayer.Character
-				local hum = char and char:FindFirstChildOfClass("Humanoid")
-				if not char or not safeAlive(hum) then break end
-				if not canSeePlayer2(nearestHRP) then break end
-
-				if os.clock() - lastTick >= 1 then
-					SuspicionManager.Add(2, nearestPlayer)
-					lastTick = os.clock()
-				end
-
-				HUMANOID2:MoveTo(nearestHRP.Position)
-				task.wait(0.2)
-			end
-
-			stopWalk2()
-			HUMANOID2.WalkSpeed = PATROL_SPEED
-		end
-
-		-- Patrol between points (reverse: 3 -> 2 -> 1)
-		if #Waypoints2 > 0 then
-			local point = Waypoints2[currentPoint2]
-			if point then
-				HUMANOID2.WalkSpeed = PATROL_SPEED
-				playWalk2()
-				moveTo2(point.Position)
-				stopWalk2()
-				currentPoint2 = ((currentPoint2 - 2) % #Waypoints2) + 1
-				task.wait(1)
-			end
-		else
-			task.wait(0.5)
-		end
-	end
-end
-
 task.spawn(patrol)
-task.spawn(patrol2)
