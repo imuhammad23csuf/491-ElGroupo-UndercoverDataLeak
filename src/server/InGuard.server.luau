@@ -1,207 +1,264 @@
---In Guard Script similar behavior but smarter
+-- InsideGuardScript
+-- Tutorial-style AI with chase + smarter search + suspicion system
 
--- Guard Script
--- Implement a range for the AI to judge the distance between it and the player
--- Implement a way to tell guard the best time to chase the player
--- Implement a system telling the AI to chase for a certain interval of time up to 4 seconds
--- Roblox uses studs as a unit of measurement 1 stud = 1 foot
--- Implement the A* Algorithm using PathfindingService
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
-PATROL_RETURNTIME = 4 -- Since we don't want the player to run far we set it to 4 seconds
+-- Get SuspicionManager
+local SuspicionManager = require(ReplicatedStorage.Shared.SuspicionManager)
 
-CHASE_RANGE = 4 -- If player steps within 4 feet of NPC's patrol zone it can chase the player
+-- Guard setup
+local guard = script.Parent
 
-MODEL = "GuardInside" -- The Model is called Guard Outside
+-- CHANGED: search recursively (everywhere under guard), and PatrolPoints anywhere in Workspace
+local humanoid = guard:WaitForChild("Humanoid", math.huge) or guard:FindFirstChildWhichIsA("Humanoid", true) or workspace:FindFirstChildWhichIsA("Humanoid", true)
+local hrp = guard:FindFirstChild("HumanoidRootPart", true) or workspace:FindFirstChild("HumanoidRootPart", true)
+local patrolPoints = workspace:FindFirstChild("PatrolPoints", true) or guard:FindFirstChild("PatrolPoints", true)
 
-FOV_TOTAL_DEGREES = 90
+-- State machine
+local currentState = "Patrol" -- Patrol, Chase, Search, Return
 
-PATROL_SPEED = 16
+-- Patrol setup
+local patrolIndex = 1
+local patrolTable = {}
 
-CHASE_SPEED = 4.5
-
-LOS_RANGE = 100
-
-
-local PathfindingService = game:GetService("PathfindingService") -- Intialize Pathfinding Service
-
--- Added: path agent settings to reduce jitter/snaps by spacing waypoints out a bit
-local PATH_PARAMS = {
-	AgentRadius = 2,
-	AgentHeight = 5,
-	AgentCanJump = true,
-	WaypointSpacing = 6,
-}
-
--- FIX: get ALL guards, not just one
-for _, rig in ipairs(game.Workspace:GetChildren()) do
-	if rig:IsA("Model") and rig.Name == MODEL then
-
-		task.spawn(function()
-
-			local waypoints = rig:FindFirstChild("Waypoints", true)
-			if not waypoints then
-				error("Waypoints folder not found in the rig. Please create a folder named 'Waypoints' inside the rig Model and add Part objects for patrol points.")
-			end
-
-			local humanoid = rig:FindFirstChild("Humanoid", true)
-			if not humanoid then
-				error("Humanoid not found in the rig. Ensure the rig contains a Humanoid.")
-			end
-
-			humanoid.WalkSpeed = PATROL_SPEED
-
-			-- Added: reduce physics correction snaps (ownership + limb collisions)
-			local rootPart = rig:FindFirstChild("HumanoidRootPart", true) or rig.PrimaryPart
-			if rootPart then
-				rootPart:SetNetworkOwner(nil)
-			end
-
-			for _, part in ipairs(rig:GetDescendants()) do
-				if part:IsA("BasePart") and part ~= rootPart then
-					part.CanCollide = false
-				end
-			end
-
-			-- Simple animation + animator setup (put your animation id below)
-			local animator = humanoid:FindFirstChildOfClass("Animator")
-			if not animator then
-				animator = Instance.new("Animator")
-				animator.Parent = humanoid
-			end
-
-			local walkAnim = Instance.new("Animation")
-			walkAnim.AnimationId = "rbxassetid://913402848"
-
-			local walkTrack = animator:LoadAnimation(walkAnim)
-			walkTrack.Priority = Enum.AnimationPriority.Movement
-			walkTrack.Looped = true
-			-- Play/stop walk animation based on movement speed and adjust speed dynamically
-			humanoid.Running:Connect(function(speed)
-				if speed > 0.5 then
-					if not walkTrack.IsPlaying then
-						walkTrack:Play()
-					end
-					-- Adjust animation speed to match humanoid movement speed
-					walkTrack:AdjustSpeed(speed / PATROL_SPEED)
-				else
-					if walkTrack.IsPlaying then
-						walkTrack:Stop()
-					end
-				end
-			end)
-
-			local p1 = waypoints:FindFirstChild("P1", true)
-			local p3 = waypoints:FindFirstChild("P3", true)
-			local p2 = waypoints:FindFirstChild("P2", true)
-
-			if not p1 then
-				error("Waypoint 'P1' not found inside Waypoints folder.")
-			end
-			if not p3 then
-				error("Waypoint 'P3' not found inside Waypoints folder.")
-			end
-			if not p2 then
-				error ("No P2 found")
-			end
-
-			-- Utility: compute path and move along it; returns true if completed path, false if aborted/stuck
-			local function moveToWithPath(targetPart)
-				if not rootPart then
-					rootPart = rig:FindFirstChild("HumanoidRootPart", true) or rig.PrimaryPart
-					if not rootPart then
-						return false
-					end
-				end
-
-				if not walkTrack.IsPlaying then
-					walkTrack:Play()
-				end
-
-				-- Always compute path for consistency (avoid long MoveTo stalls)
-				local path = PathfindingService:CreatePath(PATH_PARAMS)
-				path:ComputeAsync(rootPart.Position, targetPart.Position)
-				if path.Status ~= Enum.PathStatus.Success then
-					-- try a fallback MoveTo (short, non-blocking)
-					humanoid:MoveTo(targetPart.Position)
-					-- short wait and early return to avoid being stuck
-					task.wait(1)
-					return false
-				end
-
-				local waypoints = path:GetWaypoints()
-				-- if no waypoints, fallback
-				if #waypoints == 0 then
-					humanoid:MoveTo(targetPart.Position)
-					task.wait(1)
-					return false
-				end
-
-				-- Iterate waypoints with a local stuck-timeout and distance-check (avoids MoveToFinished:Wait() pitfalls)
-				for i, wp in ipairs(waypoints) do
-					if not walkTrack.IsPlaying then
-						walkTrack:Play()
-					end
-
-					-- Handle jump action
-					if wp.Action == Enum.PathWaypointAction.Jump then
-						humanoid.Jump = true
-					end
-
-					-- Start moving toward the waypoint
-					humanoid:MoveTo(wp.Position)
-
-					-- Wait until either we reach within a threshold OR timeout occurs
-					local reached = false
-					local startTime = tick()
-					local timeout = 5 -- seconds per waypoint before we abort and recompute path
-					local reachThreshold = 4 -- studs distance considered "reached"; generous to accommodate network
-					while tick() - startTime < timeout do
-						-- If rootPart becomes unavailable, abort
-						if not rootPart or not rootPart.Parent then
-							break
-						end
-
-						local dist = (rootPart.Position - wp.Position).Magnitude
-						if dist <= reachThreshold then
-							reached = true
-							break
-						end
-
-						-- Small sleep to avoid tight loop
-						task.wait(0.08)
-					end
-
-					if not reached then
-						-- abort current path attempt so caller can decide (we'll return false -> outer loop can recalc)
-						return false
-					end
-				end
-
-				-- Successfully reached final waypoint
-				return true
-			end
-
-			-- Patrol loop using robust path movement above
-			while true do
-				   -- Use the improved moveToWithPath (always computes path and times out gracefully)
-				   moveToWithPath(p1)
-				   task.wait(1)
-
-				   moveToWithPath(p2)
-				   task.wait(1.5)
-
-				   moveToWithPath(p3)
-				   task.wait(1)
-
-				   moveToWithPath(p2)
-				   task.wait(1.5)
-			end
-
-		end)
+if patrolPoints then
+	for _, point in patrolPoints:GetChildren() do
+		if point:IsA("BasePart") then
+			table.insert(patrolTable, point)
+		end
 	end
 end
--- Guard AI Summary:
--- NPC patrols between waypoints using MoveTo and A* pathfinding.
--- Animation starts instantly to avoid sliding.
--- Server network ownership and disabled limb collisions reduce jitter,
--- snapping, and micro-teleports during movement.
+
+-- Search setup
+local lastKnownPosition = Vector3.new(0, 0, 0)
+local searchTimer = 0
+local searchDuration = 8
+local searchPoints = {}
+local searchIndex = 1
+
+-- Vision setup
+local visionRange = 30
+local chaseSpeed = 16
+local patrolSpeed = 9
+local searchSpeed = 12
+
+-- Suspicion rates
+local chaseRate = 15 -- suspicion per second while chasing
+local searchDecayRate = 5 -- suspicion decay per second while searching
+local patrolDecayRate = 2 -- suspicion decay per second while patrolling
+
+-- Current target player
+local targetPlayer = nil
+
+-- TODO: match exact tutorial function name
+local function CanSeePlayer(player)
+	local character = player.Character
+	if not character then return false end
+	
+	local playerHrp = character:FindFirstChild("HumanoidRootPart")
+	if not playerHrp then return false end
+	
+	local distance = (hrp.Position - playerHrp.Position).Magnitude
+	if distance > visionRange then return false end
+	
+	-- TODO: match exact tutorial line of sight check
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {guard, character}
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	
+	local direction = playerHrp.Position - hrp.Position
+	local result = workspace:Raycast(hrp.Position, direction, rayParams)
+	
+	return result == nil
+end
+
+-- TODO: match exact tutorial function name
+local function FindNearestPlayer()
+	local nearestPlayer = nil
+	local nearestDistance = visionRange
+	
+	for _, player in Players:GetPlayers() do
+		if CanSeePlayer(player) then
+			local character = player.Character
+			if character then
+				local playerHrp = character:FindFirstChild("HumanoidRootPart")
+				if playerHrp then
+					local distance = (hrp.Position - playerHrp.Position).Magnitude
+					if distance < nearestDistance then
+						nearestDistance = distance
+						nearestPlayer = player
+					end
+				end
+			end
+		end
+	end
+	
+	return nearestPlayer
+end
+
+-- TODO: match exact tutorial function name
+local function MoveToPosition(position, speed)
+	humanoid.WalkSpeed = speed
+	humanoid:MoveTo(position)
+end
+
+-- TODO: match exact tutorial function name
+local function PatrolState(dt)
+	if #patrolTable == 0 then return end
+	
+	local targetPoint = patrolTable[patrolIndex]
+	MoveToPosition(targetPoint.Position, patrolSpeed)
+	
+	-- Decay suspicion while patrolling
+	if targetPlayer then
+		local suspicion = SuspicionManager.Get(targetPlayer)
+		if suspicion > 0 then
+			SuspicionManager.Reduce(patrolDecayRate * dt, targetPlayer)
+		end
+	end
+	
+	-- Check if reached patrol point
+	local distance = (hrp.Position - targetPoint.Position).Magnitude
+	if distance < 3 then
+		patrolIndex = patrolIndex % #patrolTable + 1
+	end
+	
+	-- Check for player detection
+	local detectedPlayer = FindNearestPlayer()
+	if detectedPlayer then
+		targetPlayer = detectedPlayer
+		currentState = "Chase"
+	end
+end
+
+-- TODO: match exact tutorial function name
+local function ChaseState(dt)
+	if not targetPlayer then
+		currentState = "Patrol"
+		return
+	end
+	
+	local character = targetPlayer.Character
+	if not character then
+		currentState = "Search"
+		return
+	end
+	
+	local playerHrp = character:FindFirstChild("HumanoidRootPart")
+	if not playerHrp then
+		currentState = "Search"
+		return
+	end
+	
+	-- Increase suspicion while chasing
+	SuspicionManager.Add(chaseRate * dt, targetPlayer)
+	
+	-- Check if can still see player
+	if CanSeePlayer(targetPlayer) then
+		lastKnownPosition = playerHrp.Position
+		MoveToPosition(playerHrp.Position, chaseSpeed)
+	else
+		-- Player lost, switch to search
+		currentState = "Search"
+		searchTimer = 0
+		
+		-- Generate search points around last known position
+		searchPoints = {}
+		for i = 1, 4 do
+			local offset = Vector3.new(
+				math.random(-10, 10),
+				0,
+				math.random(-10, 10)
+			)
+			table.insert(searchPoints, lastKnownPosition + offset)
+		end
+		searchIndex = 1
+	end
+end
+
+-- TODO: match exact tutorial function name
+local function SearchState(dt)
+	-- Decay suspicion while searching
+	if targetPlayer then
+		local suspicion = SuspicionManager.Get(targetPlayer)
+		if suspicion > 0 then
+			SuspicionManager.Reduce(searchDecayRate * dt, targetPlayer)
+		end
+	end
+	
+	-- Check if player is rediscovered
+	local detectedPlayer = FindNearestPlayer()
+	if detectedPlayer then
+		targetPlayer = detectedPlayer
+		currentState = "Chase"
+		return
+	end
+	
+	-- Move to search points
+	if #searchPoints > 0 then
+		local searchPoint = searchPoints[searchIndex]
+		MoveToPosition(searchPoint, searchSpeed)
+		
+		local distance = (hrp.Position - searchPoint).Magnitude
+		if distance < 3 then
+			searchIndex = searchIndex % #searchPoints + 1
+		end
+	else
+		-- No search points, just look around
+		MoveToPosition(lastKnownPosition, searchSpeed)
+	end
+	
+	-- Update search timer
+	searchTimer = searchTimer + dt
+	if searchTimer >= searchDuration then
+		currentState = "Patrol"
+		targetPlayer = nil
+	end
+end
+
+-- TODO: match exact tutorial function name
+local function ReturnState(dt)
+	-- Return to patrol
+	if #patrolTable > 0 then
+		local targetPoint = patrolTable[patrolIndex]
+		MoveToPosition(targetPoint.Position, patrolSpeed)
+		
+		local distance = (hrp.Position - targetPoint.Position).Magnitude
+		if distance < 3 then
+			currentState = "Patrol"
+		end
+	else
+		currentState = "Patrol"
+	end
+	
+	-- Decay suspicion while returning
+	if targetPlayer then
+		local suspicion = SuspicionManager.Get(targetPlayer)
+		if suspicion > 0 then
+			SuspicionManager.Reduce(patrolDecayRate * dt, targetPlayer)
+		end
+	end
+end
+
+-- Main update loop
+local lastTime = tick()
+
+while true do
+	local currentTime = tick()
+	local dt = currentTime - lastTime
+	lastTime = currentTime
+	
+	if currentState == "Patrol" then
+		PatrolState(dt)
+	elseif currentState == "Chase" then
+		ChaseState(dt)
+	elseif currentState == "Search" then
+		SearchState(dt)
+	elseif currentState == "Return" then
+		ReturnState(dt)
+	end
+	
+	task.wait(0.1)
+end

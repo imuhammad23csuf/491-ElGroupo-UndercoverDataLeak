@@ -1,1 +1,2 @@
-print("Hello world, from client!")
+local controller = script.Parent:WaitForChild("SuspicionController")
+require(controller)

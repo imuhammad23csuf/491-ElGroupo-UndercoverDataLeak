@@ -1,3 +1,4 @@
+--SuspicionController
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
