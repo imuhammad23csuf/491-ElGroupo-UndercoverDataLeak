@@ -1,125 +1,76 @@
--- This needs to open sliding doors only when a keycard is scanned
 local TweenService = game:GetService("TweenService")
-local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 
--- === CONFIG ===
-local DOOR_MODEL_NAME = "Sliding Door" -- <-- change to your parent model name
-local LEFT_NAME = "DoorLeft"
-local RIGHT_NAME = "DoorRight"
+-- Reference the main model
+local mainModel = workspace:WaitForChild("S.S.R. Teknikk Door")
+local doorLeft = mainModel:WaitForChild("DoorLeft")
+local doorRight = mainModel:WaitForChild("DoorRight")
 
-local OPEN_TIME = 3
-local TWEEN_TIME = 1
-local OPEN_DISTANCE = 6
+-- Configuration
+local openDistance = 15 -- Increased so it opens BEFORE you reach it
+local slideAmount = 9.5    -- Increased so you can fit through easily
+local tweenSpeed = 0.6  -- Lower is faster (0.6s to open/close)
+local tweenInfo = TweenInfo.new(tweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- === GET DOOR OBJECTS ===
-local doorModel = Workspace:WaitForChild(DOOR_MODEL_NAME)
-local leftDoor = doorModel:WaitForChild(LEFT_NAME)
-local rightDoor = doorModel:WaitForChild(RIGHT_NAME)
+-- Store original Pivot CFrames
+local leftClosedPivot = doorLeft:GetPivot()
+local rightClosedPivot = doorRight:GetPivot()
 
--- Ensure PrimaryPart + return all BaseParts for collision/anchoring changes
-local function getParts(obj)
-	local parts = {}
-	if obj:IsA("Model") then
-		if not obj.PrimaryPart then
-			local pp = obj:FindFirstChildWhichIsA("BasePart", true)
-			if pp then obj.PrimaryPart = pp end
-		end
-		for _, d in ipairs(obj:GetDescendants()) do
-			if d:IsA("BasePart") then
-				table.insert(parts, d)
+-- Calculate open Pivot CFrames (Adjust axis if doors move wrong way)
+local leftOpenPivot = leftClosedPivot * CFrame.new(-slideAmount, 0, 0)
+local rightOpenPivot = rightClosedPivot * CFrame.new(slideAmount, 0, 0)
+
+local isOpen = false
+local isAnimating = false
+
+-- Improved Animation Function
+local function animateDoors(shouldOpen)
+	isAnimating = true
+	
+	local startLeft = doorLeft:GetPivot()
+	local startRight = doorRight:GetPivot()
+	
+	local targetLeft = shouldOpen and leftOpenPivot or leftClosedPivot
+	local targetRight = shouldOpen and rightOpenPivot or rightClosedPivot
+	
+	local val = Instance.new("NumberValue")
+	val.Value = 0
+	
+	local connection
+	connection = val:GetPropertyChangedSignal("Value"):Connect(function()
+		doorLeft:PivotTo(startLeft:Lerp(targetLeft, val.Value))
+		doorRight:PivotTo(startRight:Lerp(targetRight, val.Value))
+	end)
+	
+	local tween = TweenService:Create(val, tweenInfo, {Value = 1})
+	tween:Play()
+	
+	tween.Completed:Connect(function()
+		connection:Disconnect()
+		val:Destroy()
+		isAnimating = false
+	end)
+end
+
+-- Detection Loop
+while task.wait(0.2) do
+	local playerNear = false
+	for _, player in pairs(Players:GetPlayers()) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local distance = (char.HumanoidRootPart.Position - leftClosedPivot.Position).Magnitude
+			if distance <= openDistance then
+				playerNear = true
+				break
 			end
 		end
-	else
-		table.insert(parts, obj)
 	end
-	return parts
-end
 
-local function getCFrame(obj)
-	if obj:IsA("Model") then
-		return obj:GetPrimaryPartCFrame()
-	else
-		return obj.CFrame
+	if playerNear and not isOpen and not isAnimating then
+		isOpen = true
+		animateDoors(true)
+	elseif not playerNear and isOpen and not isAnimating then
+		isOpen = false
+		animateDoors(false)
 	end
-end
-
-local function setCFrame(obj, cf)
-	if obj:IsA("Model") then
-		obj:SetPrimaryPartCFrame(cf)
-	else
-		obj.CFrame = cf
-	end
-end
-
-local function setDoorPhysics(obj, anchored, canCollide)
-	for _, p in ipairs(getParts(obj)) do
-		p.Anchored = anchored
-		p.CanCollide = canCollide
-	end
-end
-
--- Tween helper that returns a "done" signal
-local function tweenAsync(obj, targetCFrame)
-	local tweenInfo = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-
-	local proxy = Instance.new("CFrameValue")
-	proxy.Value = getCFrame(obj)
-
-	local conn = proxy:GetPropertyChangedSignal("Value"):Connect(function()
-		setCFrame(obj, proxy.Value)
-	end)
-
-	local tween = TweenService:Create(proxy, tweenInfo, {Value = targetCFrame})
-	local done = false
-
-	tween.Completed:Connect(function()
-		done = true
-		conn:Disconnect()
-		proxy:Destroy()
-	end)
-
-	tween:Play()
-
-	return function()
-		while not done do task.wait() end
-	end
-end
-
--- Prepare: anchor doors so physics won’t shove players
-setDoorPhysics(leftDoor, true, true)
-setDoorPhysics(rightDoor, true, true)
-
--- Store closed positions
-local leftClosed = getCFrame(leftDoor)
-local rightClosed = getCFrame(rightDoor)
-
--- Open positions (slide apart on X axis)
-local leftOpen = leftClosed * CFrame.new(-OPEN_DISTANCE, 0, 0)
-local rightOpen = rightClosed * CFrame.new(OPEN_DISTANCE, 0, 0)
-
-while true do
-	-- OPEN together (noclip during movement)
-	setDoorPhysics(leftDoor, true, false)
-	setDoorPhysics(rightDoor, true, false)
-
-	local waitLeftOpen = tweenAsync(leftDoor, leftOpen)
-	local waitRightOpen = tweenAsync(rightDoor, rightOpen)
-
-	waitLeftOpen()
-	waitRightOpen()
-
-	task.wait(OPEN_TIME)
-
-	-- CLOSE together (noclip during movement)
-	local waitLeftClose = tweenAsync(leftDoor, leftClosed)
-	local waitRightClose = tweenAsync(rightDoor, rightClosed)
-
-	waitLeftClose()
-	waitRightClose()
-
-	-- collide again when closed
-	setDoorPhysics(leftDoor, true, true)
-	setDoorPhysics(rightDoor, true, true)
-
-	task.wait(OPEN_TIME)
 end

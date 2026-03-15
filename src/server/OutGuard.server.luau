@@ -18,7 +18,7 @@ local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
 local CHASE_TIMEOUT = 10 -- seconds before giving up
 
 -- Suspicion tuning (Outside)
-local SUSPICION_TICK_SEEN = 2      -- add when actively seeing player (per tick)
+local SUSPICION_TICK_SEEN = 5      -- add when actively seeing player (per tick)
 local SUSPICION_TICK_RATE = 0.2    -- matches chase tick wait
 
 -- === SUSPICION THROTTLE/BATCH ===
@@ -36,7 +36,7 @@ local function flushSuspicion(player)
 	local uid = player.UserId
 	local delta = pendingSuspicion[uid] or 0
 	if delta > 0 then
-		SuspicionManager.Add(delta, player)
+		SuspicionManager.Add(delta)
 		pendingSuspicion[uid] = 0
 	end
 end

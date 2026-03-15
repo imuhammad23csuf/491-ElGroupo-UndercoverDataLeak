@@ -1,0 +1,3197 @@
+<roblox version="4">
+  <Item class="Lighting" referent="0">
+    <Properties>
+      <string name="Name">Lighting</string>
+      <Color3 name="Ambient">
+        <R>0</R>
+        <G>0</G>
+        <B>0</B>
+      </Color3>
+      <float name="Brightness">2</float>
+      <bool name="GlobalShadows">true</bool>
+      <bool name="Outlines">false</bool>
+      <token name="Technology">1</token>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="1">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="2">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Hello</string>
+          <string name="Source"><![CDATA[return function()
+	print("Hello, world!")
+end
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">SuspicionManager</string>
+          <string name="Source">-- SuspicionManager.lua
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local SuspicionManager = {}
+
+local MAX_VAL = 100
+local DEBUG_ENABLED = true
+
+local bindable = Instance.new("BindableEvent")
+SuspicionManager.Changed = bindable.Event
+
+local updateRemote
+local actionRemote
+local legacyUpdateRemote
+
+local localSuspicion = 0
+local serverSuspicionByUserId = {}
+
+local DECAY_INTERVAL = 1
+local DECAY_AMOUNT = 1
+
+local function debugLog(message)
+	if DEBUG_ENABLED then
+		warn(("[SuspicionManager] %s"):format(message))
+	end
+end
+
+local function clampNumber(value)
+	return math.clamp(tonumber(value) or 0, 0, MAX_VAL)
+end
+
+local function getSharedRoot()
+	local shared = ReplicatedStorage:FindFirstChild("Shared")
+	if not shared and RunService:IsClient() then
+		shared = ReplicatedStorage:WaitForChild("Shared", 10)
+	end
+	return shared or ReplicatedStorage
+end
+
+local function getOrCreateRemote(parent, name)
+	local remote = parent:FindFirstChild(name)
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+
+	remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = parent
+	return remote
+end
+
+local function connectClientUpdateRemote(remote)
+	if not remote then
+		return
+	end
+
+	remote.OnClientEvent:Connect(function(newValue)
+		localSuspicion = clampNumber(newValue)
+		debugLog(("Client sync -&gt; %d"):format(localSuspicion))
+		bindable:Fire(localSuspicion)
+	end)
+end
+
+local function getServerSuspicion(player)
+	if not player then
+		return 0
+	end
+	return serverSuspicionByUserId[player.UserId] or 0
+end
+
+local function pushToClient(player, newValue)
+	if player and player.Parent then
+		updateRemote:FireClient(player, newValue)
+		if legacyUpdateRemote then
+			legacyUpdateRemote:FireClient(player, newValue)
+		end
+	end
+end
+
+local function setServerSuspicion(player, newValue)
+	if not player then
+		return
+	end
+
+	local clamped = clampNumber(newValue)
+	serverSuspicionByUserId[player.UserId] = clamped
+	pushToClient(player, clamped)
+	bindable:Fire(clamped, player)
+end
+
+local function applyServerDelta(player, delta)
+	if not player then
+		return
+	end
+
+	local currentValue = getServerSuspicion(player)
+	local newValue = clampNumber(currentValue + delta)
+	serverSuspicionByUserId[player.UserId] = newValue
+
+	debugLog(("%s %+d -&gt; %d"):format(player.Name, delta, newValue))
+	pushToClient(player, newValue)
+	bindable:Fire(newValue, player)
+end
+
+if RunService:IsServer() then
+	local root = getSharedRoot()
+	updateRemote = getOrCreateRemote(root, "SuspicionUpdate")
+	actionRemote = getOrCreateRemote(root, "SuspicionAction")
+	legacyUpdateRemote = getOrCreateRemote(ReplicatedStorage, "UpdateSuspicionEvent")
+else
+	local root = getSharedRoot()
+	updateRemote = root:WaitForChild("SuspicionUpdate")
+	actionRemote = root:WaitForChild("SuspicionAction")
+	legacyUpdateRemote = ReplicatedStorage:WaitForChild("UpdateSuspicionEvent", 5)
+end
+
+function SuspicionManager.Add(amount, player)
+	local delta = math.max(0, tonumber(amount) or 0)
+	if delta &lt;= 0 then
+		return
+	end
+
+	if RunService:IsServer() then
+		if player then
+			applyServerDelta(player, delta)
+		else
+			for _, candidate in ipairs(Players:GetPlayers()) do
+				applyServerDelta(candidate, delta)
+			end
+		end
+	else
+		actionRemote:FireServer("Add", delta)
+	end
+end
+
+function SuspicionManager.Reduce(amount, player)
+	local delta = math.max(0, tonumber(amount) or 0)
+	if delta &lt;= 0 then
+		return
+	end
+
+	if RunService:IsServer() then
+		if player then
+			applyServerDelta(player, -delta)
+		else
+			for _, candidate in ipairs(Players:GetPlayers()) do
+				applyServerDelta(candidate, -delta)
+			end
+		end
+	else
+		actionRemote:FireServer("Reduce", delta)
+	end
+end
+
+function SuspicionManager.Set(value, player)
+	local clamped = clampNumber(value)
+
+	if not RunService:IsServer() then
+		error("SuspicionManager.Set() can only be called from the server")
+	end
+
+	if player then
+		setServerSuspicion(player, clamped)
+	else
+		for _, candidate in ipairs(Players:GetPlayers()) do
+			setServerSuspicion(candidate, clamped)
+		end
+	end
+end
+
+function SuspicionManager.Get(player)
+	if RunService:IsServer() then
+		if player then
+			return getServerSuspicion(player)
+		end
+		return 0
+	end
+
+	return localSuspicion
+end
+
+if RunService:IsServer() then
+	Players.PlayerAdded:Connect(function(player)
+		setServerSuspicion(player, 0)
+		debugLog(("PlayerAdded sync -&gt; %s = 0"):format(player.Name))
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		serverSuspicionByUserId[player.UserId] = nil
+	end)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		setServerSuspicion(player, 0)
+	end
+
+	actionRemote.OnServerEvent:Connect(function(player, action, amount)
+		if action == "Reduce" then
+			SuspicionManager.Reduce(amount, player)
+		elseif action == "Add" then
+			SuspicionManager.Add(amount, player)
+		elseif action == "Get" then
+			pushToClient(player, getServerSuspicion(player))
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(DECAY_INTERVAL)
+			for _, player in ipairs(Players:GetPlayers()) do
+				if getServerSuspicion(player) &gt; 0 then
+					applyServerDelta(player, -DECAY_AMOUNT)
+				end
+			end
+		end
+	end)
+else
+	connectClientUpdateRemote(updateRemote)
+	connectClientUpdateRemote(legacyUpdateRemote)
+
+	task.defer(function()
+		actionRemote:FireServer("Get", 0)
+	end)
+end
+
+return SuspicionManager</string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="5">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="6">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="Script" referent="7">
+        <Properties>
+          <string name="Name">DoorScript</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
+
+-- === CONFIG ===
+local DOOR_MODEL_NAME = "S.S.R. Teknikk Door"
+local PANEL_MODEL_NAME = "Panel"
+
+local LEFT_NAME = "DoorLeft"
+local RIGHT_NAME = "DoorRight"
+
+local OPEN_DISTANCE = 8.5
+local TWEEN_TIME = 1
+local CLOSE_DELAY = 3
+
+-- === OBJECTS ===
+local doorModel = Workspace:WaitForChild(DOOR_MODEL_NAME)
+local panelModel = Workspace:WaitForChild(PANEL_MODEL_NAME)
+
+local leftDoor = doorModel:WaitForChild(LEFT_NAME)
+local rightDoor = doorModel:WaitForChild(RIGHT_NAME)
+local prompt = panelModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+
+if not prompt then
+	error("No ProximityPrompt found inside panel model: " .. PANEL_MODEL_NAME)
+end
+
+print("Found prompt:", prompt:GetFullName())
+
+local function getParts(obj)
+	local parts = {}
+
+	if obj:IsA("Model") then
+		if not obj.PrimaryPart then
+			local primary = obj:FindFirstChildWhichIsA("BasePart", true)
+			if primary then
+				obj.PrimaryPart = primary
+			else
+				error("Model '" .. obj.Name .. "' has no BasePart")
+			end
+		end
+
+		for _, d in ipairs(obj:GetDescendants()) do
+			if d:IsA("BasePart") then
+				table.insert(parts, d)
+			end
+		end
+	else
+		table.insert(parts, obj)
+	end
+
+	return parts
+end
+
+local function getCFrame(obj)
+	if obj:IsA("Model") then
+		return obj:GetPrimaryPartCFrame()
+	else
+		return obj.CFrame
+	end
+end
+
+local function setCFrame(obj, cf)
+	if obj:IsA("Model") then
+		obj:SetPrimaryPartCFrame(cf)
+	else
+		obj.CFrame = cf
+	end
+end
+
+local function setDoorPhysics(obj, anchored, canCollide)
+	for _, p in ipairs(getParts(obj)) do
+		p.Anchored = anchored
+		p.CanCollide = canCollide
+	end
+end
+
+local function tweenDoor(obj, targetCFrame)
+	local proxy = Instance.new("CFrameValue")
+	proxy.Value = getCFrame(obj)
+
+	local conn = proxy:GetPropertyChangedSignal("Value"):Connect(function()
+		setCFrame(obj, proxy.Value)
+	end)
+
+	local tween = TweenService:Create(
+		proxy,
+		TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+		{Value = targetCFrame}
+	)
+
+	tween.Completed:Connect(function()
+		conn:Disconnect()
+		proxy:Destroy()
+	end)
+
+	tween:Play()
+	return tween
+end
+
+-- === INITIAL SETUP ===
+setDoorPhysics(leftDoor, true, true)
+setDoorPhysics(rightDoor, true, true)
+
+prompt.Enabled = true
+prompt.ActionText = "Open Door"
+prompt.ObjectText = "Door"
+prompt.HoldDuration = 0
+prompt.MaxActivationDistance = 10
+prompt.RequiresLineOfSight = false
+
+local leftClosed = getCFrame(leftDoor)
+local rightClosed = getCFrame(rightDoor)
+
+local leftOpen = leftClosed * CFrame.new(-OPEN_DISTANCE, 0, 0)
+local rightOpen = rightClosed * CFrame.new(OPEN_DISTANCE, 0, 0)
+
+local isOpen = false
+local isMoving = false
+local closeAt = 0
+
+local function openDoors()
+	if isMoving then
+		return
+	end
+
+	if isOpen then
+		closeAt = tick() + CLOSE_DELAY
+		print("Door already open, extending close timer")
+		return
+	end
+
+	isMoving = true
+	print("Opening doors")
+
+	setDoorPhysics(leftDoor, true, false)
+	setDoorPhysics(rightDoor, true, false)
+
+	tweenDoor(leftDoor, leftOpen)
+	tweenDoor(rightDoor, rightOpen)
+
+	task.wait(TWEEN_TIME)
+
+	isOpen = true
+	isMoving = false
+	closeAt = tick() + CLOSE_DELAY
+
+	print("Doors opened, will close at", closeAt)
+end
+
+local function closeDoors()
+	if isMoving or not isOpen then
+		return
+	end
+
+	isMoving = true
+	print("Closing doors")
+
+	setDoorPhysics(leftDoor, true, false)
+	setDoorPhysics(rightDoor, true, false)
+
+	tweenDoor(leftDoor, leftClosed)
+	tweenDoor(rightDoor, rightClosed)
+
+	task.wait(TWEEN_TIME)
+
+	setDoorPhysics(leftDoor, true, true)
+	setDoorPhysics(rightDoor, true, true)
+
+	isOpen = false
+	isMoving = false
+
+	print("Doors closed")
+end
+
+prompt.Triggered:Connect(function(player)
+	print("Prompt triggered by:", player.Name)
+	openDoors()
+end)
+
+task.spawn(function()
+	while true do
+		if isOpen and not isMoving and closeAt > 0 and tick() >= closeAt then
+			closeDoors()
+		end
+
+		task.wait(0.1)
+	end
+end)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="8">
+        <Properties>
+          <string name="Name">InGuard</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[-- GuardInside (Patrol + Advanced Chase + Search + Batched Suspicion)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+
+local GUARD = Workspace:WaitForChild("GuardInside")
+local RIG = GUARD:WaitForChild("Rig")
+local HUMANOID = RIG:WaitForChild("Humanoid")
+local HRP = RIG:WaitForChild("HumanoidRootPart")
+
+-- === SETTINGS ===
+local PATROL_SPEED = 10
+local CHASE_SPEED = 16
+local VISION_RANGE = 80
+local VISION_ANGLE = math.cos(math.rad(60))
+local CHASE_TIMEOUT = 10
+local PATROL_TICK_RATE = 0.2
+local SEARCH_TICK_RATE = 0.15
+local SEARCH_DURATION = 2.5
+local SEARCH_MOVE_TIMEOUT = 2
+
+-- Suspicion tuning (Inside)
+local SUSPICION_TICK_SEEN = 3
+local SUSPICION_TICK_SEARCH = 1
+local SUSPICION_TICK_RATE = 0.2
+
+-- === SUSPICION THROTTLE/BATCH ===
+local SUSPICION_PUSH_INTERVAL = 0.5
+local pendingSuspicion = {}
+
+local function queueSuspicion(player, amount)
+	if not player or not player.UserId then
+		return
+	end
+
+	local uid = player.UserId
+	pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+end
+
+local function flushSuspicion(player)
+	if not player or not player.UserId then
+		return
+	end
+
+	local uid = player.UserId
+	local delta = pendingSuspicion[uid] or 0
+	if delta > 0 then
+		SuspicionManager.Add(delta, player)
+		pendingSuspicion[uid] = 0
+	end
+end
+
+task.spawn(function()
+	while task.wait(SUSPICION_PUSH_INTERVAL) do
+		for uid, delta in pairs(pendingSuspicion) do
+			if delta and delta > 0 then
+				local player = Players:GetPlayerByUserId(uid)
+				if player then
+					SuspicionManager.Add(delta, player)
+				end
+				pendingSuspicion[uid] = 0
+			end
+		end
+	end
+end)
+
+-- === WALK ANIMATION ===
+local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848"
+local Animator = HUMANOID:FindFirstChildOfClass("Animator") or Instance.new("Animator", HUMANOID)
+local WalkTrack do
+	local anim = Instance.new("Animation")
+	anim.AnimationId = WALK_ANIM_ID
+	WalkTrack = Animator:LoadAnimation(anim)
+	WalkTrack.Looped = true
+	WalkTrack.Priority = Enum.AnimationPriority.Movement
+end
+
+local function playWalk()
+	if WalkTrack and not WalkTrack.IsPlaying then
+		WalkTrack:Play()
+	end
+end
+
+local function stopWalk()
+	if WalkTrack and WalkTrack.IsPlaying then
+		WalkTrack:Stop()
+	end
+end
+
+local function setMoveSpeed(speed)
+	HUMANOID.WalkSpeed = speed
+	if WalkTrack then
+		WalkTrack:AdjustSpeed(math.max(speed / PATROL_SPEED, 0.1))
+	end
+end
+
+-- === PATROL POINTS ===
+local PatrolFolder = RIG:FindFirstChild("PatrolPoints") or GUARD:FindFirstChild("PatrolPoints")
+local Waypoints = {}
+if PatrolFolder then
+	for _, part in ipairs(PatrolFolder:GetChildren()) do
+		if part:IsA("BasePart") then
+			table.insert(Waypoints, part)
+		end
+	end
+	table.sort(Waypoints, function(a, b)
+		local na = tonumber(a.Name:match("%d+")) or math.huge
+		local nb = tonumber(b.Name:match("%d+")) or math.huge
+		return na < nb
+	end)
+end
+local currentPoint = 1
+
+-- === HELPERS ===
+local sightParams = RaycastParams.new()
+sightParams.FilterType = Enum.RaycastFilterType.Exclude
+sightParams.FilterDescendantsInstances = {GUARD}
+
+local function safeAlive(humanoid)
+	return humanoid and humanoid.Health > 0 and humanoid.Parent
+end
+
+local function getCharacterState(player)
+	local char = player and player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChild("Humanoid")
+	if hrp and safeAlive(hum) then
+		return char, hrp, hum
+	end
+	return char, nil, hum
+end
+
+local function canSeePlayer(playerHRP)
+	if not HRP or not playerHRP then
+		return false
+	end
+
+	local diff = playerHRP.Position - HRP.Position
+	local dist = diff.Magnitude
+	if dist > VISION_RANGE then
+		return false
+	end
+
+	local dir = diff.Unit
+	if HRP.CFrame.LookVector:Dot(dir) < VISION_ANGLE then
+		return false
+	end
+
+	local ray = Workspace:Raycast(HRP.Position, dir * dist, sightParams)
+	if not ray then
+		return true
+	end
+
+	local hitModel = ray.Instance and ray.Instance:FindFirstAncestorOfClass("Model")
+	return hitModel and hitModel == playerHRP.Parent
+end
+
+local function moveTo(pos, timeout)
+	if not HUMANOID or not HRP or not pos then
+		return false
+	end
+
+	HUMANOID:MoveTo(pos)
+
+	local distance = (HRP.Position - pos).Magnitude
+	local speed = math.max(HUMANOID.WalkSpeed, 1)
+	local deadline = os.clock() + (timeout or (distance / speed) + 1)
+
+	while os.clock() < deadline do
+		if (HRP.Position - pos).Magnitude <= 3 then
+			return true
+		end
+		task.wait(0.1)
+	end
+
+	return false
+end
+
+local function findNearestVisiblePlayer()
+	local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local _, hrp = getCharacterState(player)
+		if hrp then
+			local dist = (hrp.Position - HRP.Position).Magnitude
+			if dist < minDist and canSeePlayer(hrp) then
+				minDist = dist
+				nearestPlayer = player
+				nearestHRP = hrp
+			end
+		end
+	end
+
+	return nearestPlayer, nearestHRP
+end
+
+-- === MAIN BEHAVIOR ===
+local function patrol()
+	while task.wait(PATROL_TICK_RATE) do
+		local nearestPlayer, nearestHRP = findNearestVisiblePlayer()
+
+		if nearestPlayer and nearestHRP then
+			setMoveSpeed(CHASE_SPEED)
+			playWalk()
+			local startTime = os.clock()
+			local lastSeenPos = nearestHRP.Position
+
+			while os.clock() - startTime < CHASE_TIMEOUT do
+				local _, currentHRP, hum = getCharacterState(nearestPlayer)
+				if not currentHRP or not safeAlive(hum) then
+					break
+				end
+
+				if canSeePlayer(currentHRP) then
+					queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
+					lastSeenPos = currentHRP.Position
+					HUMANOID:MoveTo(currentHRP.Position)
+				else
+					moveTo(lastSeenPos, SEARCH_MOVE_TIMEOUT)
+					task.wait(0.4)
+
+					local searchStart = os.clock()
+					while os.clock() - searchStart < SEARCH_DURATION do
+						queueSuspicion(nearestPlayer, SUSPICION_TICK_SEARCH)
+
+						if HRP then
+							HRP.CFrame = HRP.CFrame * CFrame.Angles(0, math.rad(35), 0)
+						end
+
+						if canSeePlayer(currentHRP) then
+							lastSeenPos = currentHRP.Position
+							break
+						end
+
+						task.wait(SEARCH_TICK_RATE)
+					end
+
+					if not canSeePlayer(currentHRP) then
+						break
+					end
+				end
+
+				task.wait(SUSPICION_TICK_RATE)
+			end
+
+			flushSuspicion(nearestPlayer)
+			stopWalk()
+			setMoveSpeed(PATROL_SPEED)
+		end
+
+		if #Waypoints > 0 then
+			local point = Waypoints[currentPoint]
+			if point then
+				setMoveSpeed(PATROL_SPEED)
+				playWalk()
+				moveTo(point.Position)
+				stopWalk()
+				currentPoint = (currentPoint % #Waypoints) + 1
+				task.wait(1)
+			end
+		else
+			task.wait(0.5)
+		end
+	end
+end
+
+task.spawn(patrol)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="9">
+        <Properties>
+          <string name="Name">OutGuard</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[-- GuardOutside (Patrol + Basic Chase + Batched Suspicion)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+
+local GUARD = Workspace:WaitForChild("GuardOutside")
+local RIG = GUARD:WaitForChild("Rig")
+local HUMANOID = RIG:WaitForChild("Humanoid")
+local HRP = RIG:WaitForChild("HumanoidRootPart")
+
+-- === SETTINGS ===
+local PATROL_SPEED = 10
+local CHASE_SPEED = 16
+local VISION_RANGE = 80
+local VISION_ANGLE = math.cos(math.rad(60))
+local CHASE_TIMEOUT = 10
+local PATROL_TICK_RATE = 0.2
+
+-- Suspicion tuning (Outside)
+local SUSPICION_TICK_SEEN = 2
+local SUSPICION_TICK_RATE = 0.2
+
+-- === SUSPICION THROTTLE/BATCH ===
+local SUSPICION_PUSH_INTERVAL = 0.5
+local pendingSuspicion = {}
+
+local function queueSuspicion(player, amount)
+	if not player or not player.UserId then
+		return
+	end
+
+	local uid = player.UserId
+	pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+end
+
+local function flushSuspicion(player)
+	if not player or not player.UserId then
+		return
+	end
+
+	local uid = player.UserId
+	local delta = pendingSuspicion[uid] or 0
+	if delta > 0 then
+		SuspicionManager.Add(delta, player)
+		pendingSuspicion[uid] = 0
+	end
+end
+
+task.spawn(function()
+	while task.wait(SUSPICION_PUSH_INTERVAL) do
+		for uid, delta in pairs(pendingSuspicion) do
+			if delta and delta > 0 then
+				local player = Players:GetPlayerByUserId(uid)
+				if player then
+					SuspicionManager.Add(delta, player)
+				end
+				pendingSuspicion[uid] = 0
+			end
+		end
+	end
+end)
+
+-- === WALK ANIMATION ===
+local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848"
+local Animator = HUMANOID:FindFirstChildOfClass("Animator") or Instance.new("Animator", HUMANOID)
+local WalkTrack do
+	local anim = Instance.new("Animation")
+	anim.AnimationId = WALK_ANIM_ID
+	WalkTrack = Animator:LoadAnimation(anim)
+	WalkTrack.Looped = true
+	WalkTrack.Priority = Enum.AnimationPriority.Movement
+end
+
+local function playWalk()
+	if WalkTrack and not WalkTrack.IsPlaying then
+		WalkTrack:Play()
+	end
+end
+
+local function stopWalk()
+	if WalkTrack and WalkTrack.IsPlaying then
+		WalkTrack:Stop()
+	end
+end
+
+local function setMoveSpeed(speed)
+	HUMANOID.WalkSpeed = speed
+	if WalkTrack then
+		WalkTrack:AdjustSpeed(math.max(speed / PATROL_SPEED, 0.1))
+	end
+end
+
+-- === PATROL POINTS ===
+local PatrolFolder = RIG:FindFirstChild("PatrolPoints") or GUARD:FindFirstChild("PatrolPoints")
+local Waypoints = {}
+if PatrolFolder then
+	for _, part in ipairs(PatrolFolder:GetChildren()) do
+		if part:IsA("BasePart") then
+			table.insert(Waypoints, part)
+		end
+	end
+	table.sort(Waypoints, function(a, b)
+		local na = tonumber(a.Name:match("%d+")) or math.huge
+		local nb = tonumber(b.Name:match("%d+")) or math.huge
+		return na < nb
+	end)
+end
+local currentPoint = 1
+
+-- === HELPERS ===
+local sightParams = RaycastParams.new()
+sightParams.FilterType = Enum.RaycastFilterType.Exclude
+sightParams.FilterDescendantsInstances = {GUARD}
+
+local function safeAlive(humanoid)
+	return humanoid and humanoid.Health > 0 and humanoid.Parent
+end
+
+local function getCharacterState(player)
+	local char = player and player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChild("Humanoid")
+	if hrp and safeAlive(hum) then
+		return char, hrp, hum
+	end
+	return char, nil, hum
+end
+
+local function canSeePlayer(playerHRP)
+	if not HRP or not playerHRP then
+		return false
+	end
+
+	local diff = playerHRP.Position - HRP.Position
+	local dist = diff.Magnitude
+	if dist > VISION_RANGE then
+		return false
+	end
+
+	local dir = diff.Unit
+	if HRP.CFrame.LookVector:Dot(dir) < VISION_ANGLE then
+		return false
+	end
+
+	local ray = Workspace:Raycast(HRP.Position, dir * dist, sightParams)
+	if not ray then
+		return true
+	end
+
+	local hitModel = ray.Instance and ray.Instance:FindFirstAncestorOfClass("Model")
+	return hitModel and hitModel == playerHRP.Parent
+end
+
+local function moveTo(pos)
+	if not HUMANOID or not HRP or not pos then
+		return false
+	end
+
+	HUMANOID:MoveTo(pos)
+
+	local distance = (HRP.Position - pos).Magnitude
+	local speed = math.max(HUMANOID.WalkSpeed, 1)
+	local deadline = os.clock() + (distance / speed) + 1
+
+	while os.clock() < deadline do
+		if (HRP.Position - pos).Magnitude <= 3 then
+			return true
+		end
+		task.wait(0.1)
+	end
+
+	return false
+end
+
+local function findNearestVisiblePlayer()
+	local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local _, hrp = getCharacterState(player)
+		if hrp then
+			local dist = (hrp.Position - HRP.Position).Magnitude
+			if dist < minDist and canSeePlayer(hrp) then
+				minDist = dist
+				nearestPlayer = player
+				nearestHRP = hrp
+			end
+		end
+	end
+
+	return nearestPlayer, nearestHRP
+end
+
+-- === MAIN BEHAVIOR ===
+local function patrol()
+	while task.wait(PATROL_TICK_RATE) do
+		local nearestPlayer, nearestHRP = findNearestVisiblePlayer()
+
+		if nearestPlayer and nearestHRP then
+			setMoveSpeed(CHASE_SPEED)
+			playWalk()
+			local startTime = os.clock()
+
+			while os.clock() - startTime < CHASE_TIMEOUT do
+				local _, currentHRP, hum = getCharacterState(nearestPlayer)
+				if not currentHRP or not safeAlive(hum) then
+					break
+				end
+				if not canSeePlayer(currentHRP) then
+					break
+				end
+
+				queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
+				HUMANOID:MoveTo(currentHRP.Position)
+				task.wait(SUSPICION_TICK_RATE)
+			end
+
+			flushSuspicion(nearestPlayer)
+			stopWalk()
+			setMoveSpeed(PATROL_SPEED)
+		end
+
+		if #Waypoints > 0 then
+			local point = Waypoints[currentPoint]
+			if point then
+				setMoveSpeed(PATROL_SPEED)
+				playWalk()
+				moveTo(point.Position)
+				stopWalk()
+				currentPoint = (currentPoint % #Waypoints) + 1
+				task.wait(1)
+			end
+		else
+			task.wait(0.5)
+		end
+	end
+end
+
+task.spawn(patrol)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="10">
+        <Properties>
+          <string name="Name">Sound</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[
+local soundtrack = Instance.new("Sound")
+
+soundtrack.Name = "BackgroundMusic"
+soundtrack.SoundId = "rbxassetid://71678085536375"
+soundtrack.Volume = 0.45
+soundtrack.Looped = true
+soundtrack.Parent = game.Workspace
+
+soundtrack:Play()
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="11">
+        <Properties>
+          <string name="Name">hello</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[print("Hello world, from server!")
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="SoundService" referent="12">
+    <Properties>
+      <string name="Name">SoundService</string>
+      <bool name="RespectFilteringEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="StarterGui" referent="13">
+    <Properties>
+      <string name="Name">StarterGui</string>
+    </Properties>
+    <Item class="ScreenGui" referent="14">
+      <Properties>
+        <string name="Name">SuspicionGui</string>
+        <BinaryString name="AttributesSerialize"></BinaryString>
+        <bool name="AutoLocalize">true</bool>
+        <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+        <bool name="ClipToDeviceSafeArea">true</bool>
+        <int name="DisplayOrder">0</int>
+        <bool name="Enabled">true</bool>
+        <bool name="ResetOnSpawn">true</bool>
+        <Ref name="RootLocalizationTable">null</Ref>
+        <token name="SafeAreaCompatibility">1</token>
+        <bool name="DefinesCapabilities">false</bool>
+        <token name="ScreenInsets">2</token>
+        <token name="SelectionBehaviorDown">0</token>
+        <token name="SelectionBehaviorLeft">0</token>
+        <token name="SelectionBehaviorRight">0</token>
+        <token name="SelectionBehaviorUp">0</token>
+        <bool name="SelectionGroup">false</bool>
+        <int64 name="SourceAssetId">-1</int64>
+        <BinaryString name="Tags"></BinaryString>
+        <token name="ZIndexBehavior">1</token>
+      </Properties>
+      <Item class="Frame" referent="15">
+        <Properties>
+          <string name="Name">BackgroundBar</string>
+          <bool name="Active">false</bool>
+          <Vector2 name="AnchorPoint">
+            <X>0.5</X>
+            <Y>1</Y>
+          </Vector2>
+          <BinaryString name="AttributesSerialize"></BinaryString>
+          <bool name="AutoLocalize">true</bool>
+          <token name="AutomaticSize">0</token>
+          <Color3 name="BackgroundColor3">
+            <R>0.04705883</R>
+            <G>0.04705883</G>
+            <B>0.04705883</B>
+          </Color3>
+          <float name="BackgroundTransparency">0</float>
+          <Color3 name="BorderColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <token name="BorderMode">0</token>
+          <int name="BorderSizePixel">0</int>
+          <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+          <bool name="ClipsDescendants">false</bool>
+          <bool name="Draggable">false</bool>
+          <token name="InputSink">0</token>
+          <bool name="Interactable">true</bool>
+          <int name="LayoutOrder">0</int>
+          <Ref name="NextSelectionDown">null</Ref>
+          <Ref name="NextSelectionLeft">null</Ref>
+          <Ref name="NextSelectionRight">null</Ref>
+          <Ref name="NextSelectionUp">null</Ref>
+          <UDim2 name="Position">
+            <XS>0.85</XS>
+            <XO>0</XO>
+            <YS>0.95</YS>
+            <YO>0</YO>
+          </UDim2>
+          <Ref name="RootLocalizationTable">null</Ref>
+          <float name="Rotation">0</float>
+          <bool name="DefinesCapabilities">false</bool>
+          <bool name="Selectable">false</bool>
+          <token name="SelectionBehaviorDown">0</token>
+          <token name="SelectionBehaviorLeft">0</token>
+          <token name="SelectionBehaviorRight">0</token>
+          <token name="SelectionBehaviorUp">0</token>
+          <bool name="SelectionGroup">false</bool>
+          <Ref name="SelectionImageObject">null</Ref>
+          <int name="SelectionOrder">0</int>
+          <UDim2 name="Size">
+            <XS>0</XS>
+            <XO>300</XO>
+            <YS>0</YS>
+            <YO>25</YO>
+          </UDim2>
+          <token name="SizeConstraint">0</token>
+          <int64 name="SourceAssetId">-1</int64>
+          <token name="Style">0</token>
+          <BinaryString name="Tags"></BinaryString>
+          <bool name="Visible">true</bool>
+          <int name="ZIndex">1</int>
+        </Properties>
+        <Item class="Frame" referent="16">
+          <Properties>
+            <string name="Name">FillBar</string>
+            <bool name="Active">false</bool>
+            <Vector2 name="AnchorPoint">
+              <X>0</X>
+              <Y>0</Y>
+            </Vector2>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <bool name="AutoLocalize">true</bool>
+            <token name="AutomaticSize">0</token>
+            <Color3 name="BackgroundColor3">
+              <R>0</R>
+              <G>1</G>
+              <B>0.5882353</B>
+            </Color3>
+            <float name="BackgroundTransparency">0</float>
+            <Color3 name="BorderColor3">
+              <R>0</R>
+              <G>0</G>
+              <B>0</B>
+            </Color3>
+            <token name="BorderMode">0</token>
+            <int name="BorderSizePixel">0</int>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <bool name="ClipsDescendants">false</bool>
+            <bool name="Draggable">false</bool>
+            <token name="InputSink">0</token>
+            <bool name="Interactable">false</bool>
+            <int name="LayoutOrder">0</int>
+            <Ref name="NextSelectionDown">null</Ref>
+            <Ref name="NextSelectionLeft">null</Ref>
+            <Ref name="NextSelectionRight">null</Ref>
+            <Ref name="NextSelectionUp">null</Ref>
+            <UDim2 name="Position">
+              <XS>0.0033333334</XS>
+              <XO>0</XO>
+              <YS>0</YS>
+              <YO>0</YO>
+            </UDim2>
+            <Ref name="RootLocalizationTable">null</Ref>
+            <float name="Rotation">0</float>
+            <bool name="DefinesCapabilities">false</bool>
+            <bool name="Selectable">false</bool>
+            <token name="SelectionBehaviorDown">0</token>
+            <token name="SelectionBehaviorLeft">0</token>
+            <token name="SelectionBehaviorRight">0</token>
+            <token name="SelectionBehaviorUp">0</token>
+            <bool name="SelectionGroup">false</bool>
+            <Ref name="SelectionImageObject">null</Ref>
+            <int name="SelectionOrder">0</int>
+            <UDim2 name="Size">
+              <XS>-0.02</XS>
+              <XO>0</XO>
+              <YS>1</YS>
+              <YO>0</YO>
+            </UDim2>
+            <token name="SizeConstraint">0</token>
+            <int64 name="SourceAssetId">-1</int64>
+            <token name="Style">0</token>
+            <BinaryString name="Tags"></BinaryString>
+            <bool name="Visible">true</bool>
+            <int name="ZIndex">1</int>
+          </Properties>
+        </Item>
+        <Item class="UIStroke" referent="17">
+          <Properties>
+            <string name="Name">UIStroke</string>
+            <token name="ApplyStrokeMode">1</token>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <UDim name="BorderOffset">
+              <S>0</S>
+              <O>0</O>
+            </UDim>
+            <token name="BorderStrokePosition">0</token>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <Color3 name="Color">
+              <R>0.74509805</R>
+              <G>0.74509805</G>
+              <B>0.7294118</B>
+            </Color3>
+            <bool name="Enabled">true</bool>
+            <token name="LineJoinMode">0</token>
+            <bool name="DefinesCapabilities">false</bool>
+            <int64 name="SourceAssetId">-1</int64>
+            <token name="StrokeSizingMode">0</token>
+            <BinaryString name="Tags"></BinaryString>
+            <float name="Thickness">1</float>
+            <float name="Transparency">0.2</float>
+            <int name="ZIndex">1</int>
+          </Properties>
+        </Item>
+        <Item class="TextLabel" referent="18">
+          <Properties>
+            <string name="Name">TitleLabel</string>
+            <bool name="Active">false</bool>
+            <Vector2 name="AnchorPoint">
+              <X>0</X>
+              <Y>0</Y>
+            </Vector2>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <bool name="AutoLocalize">true</bool>
+            <token name="AutomaticSize">0</token>
+            <Color3 name="BackgroundColor3">
+              <R>1</R>
+              <G>1</G>
+              <B>1</B>
+            </Color3>
+            <float name="BackgroundTransparency">1</float>
+            <Color3 name="BorderColor3">
+              <R>0</R>
+              <G>1</G>
+              <B>0.5882353</B>
+            </Color3>
+            <token name="BorderMode">0</token>
+            <int name="BorderSizePixel">0</int>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <bool name="ClipsDescendants">false</bool>
+            <bool name="Draggable">false</bool>
+            <Font name="FontFace">
+              <Family>
+                <url>rbxasset://fonts/families/RobotoMono.json</url>
+              </Family>
+              <Weight>700</Weight>
+              <Style>Normal</Style>
+            </Font>
+            <token name="InputSink">0</token>
+            <bool name="Interactable">true</bool>
+            <int name="LayoutOrder">0</int>
+            <float name="LineHeight">1</float>
+            <string name="LocalizationMatchIdentifier"></string>
+            <string name="LocalizationMatchedSourceText"></string>
+            <int name="MaxVisibleGraphemes">-1</int>
+            <Ref name="NextSelectionDown">null</Ref>
+            <Ref name="NextSelectionLeft">null</Ref>
+            <Ref name="NextSelectionRight">null</Ref>
+            <Ref name="NextSelectionUp">null</Ref>
+            <string name="OpenTypeFeatures"></string>
+            <UDim2 name="Position">
+              <XS>0</XS>
+              <XO>0</XO>
+              <YS>-1.2</YS>
+              <YO>0</YO>
+            </UDim2>
+            <bool name="RichText">false</bool>
+            <Ref name="RootLocalizationTable">null</Ref>
+            <float name="Rotation">0</float>
+            <bool name="DefinesCapabilities">false</bool>
+            <bool name="Selectable">false</bool>
+            <token name="SelectionBehaviorDown">0</token>
+            <token name="SelectionBehaviorLeft">0</token>
+            <token name="SelectionBehaviorRight">0</token>
+            <token name="SelectionBehaviorUp">0</token>
+            <bool name="SelectionGroup">false</bool>
+            <Ref name="SelectionImageObject">null</Ref>
+            <int name="SelectionOrder">0</int>
+            <UDim2 name="Size">
+              <XS>1</XS>
+              <XO>0</XO>
+              <YS>1</YS>
+              <YO>0</YO>
+            </UDim2>
+            <token name="SizeConstraint">0</token>
+            <int64 name="SourceAssetId">-1</int64>
+            <BinaryString name="Tags"></BinaryString>
+            <string name="Text">Suspicion</string>
+            <Color3 name="TextColor3">
+              <R>0</R>
+              <G>1</G>
+              <B>0.5882353</B>
+            </Color3>
+            <token name="TextDirection">0</token>
+            <bool name="TextScaled">false</bool>
+            <float name="TextSize">18</float>
+            <Color3 name="TextStrokeColor3">
+              <R>0</R>
+              <G>0</G>
+              <B>0</B>
+            </Color3>
+            <float name="TextStrokeTransparency">0.5</float>
+            <float name="TextTransparency">0</float>
+            <token name="TextTruncate">0</token>
+            <bool name="TextWrapped">false</bool>
+            <token name="TextXAlignment">1</token>
+            <token name="TextYAlignment">1</token>
+            <bool name="Visible">true</bool>
+            <int name="ZIndex">1</int>
+          </Properties>
+        </Item>
+        <Item class="Frame" referent="19">
+          <Properties>
+            <string name="Name">NeonGlow</string>
+            <bool name="Active">false</bool>
+            <Vector2 name="AnchorPoint">
+              <X>0</X>
+              <Y>0</Y>
+            </Vector2>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <bool name="AutoLocalize">true</bool>
+            <token name="AutomaticSize">0</token>
+            <Color3 name="BackgroundColor3">
+              <R>1</R>
+              <G>1</G>
+              <B>1</B>
+            </Color3>
+            <float name="BackgroundTransparency">1</float>
+            <Color3 name="BorderColor3">
+              <R>0</R>
+              <G>0</G>
+              <B>0</B>
+            </Color3>
+            <token name="BorderMode">0</token>
+            <int name="BorderSizePixel">0</int>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <bool name="ClipsDescendants">false</bool>
+            <bool name="Draggable">false</bool>
+            <token name="InputSink">0</token>
+            <bool name="Interactable">true</bool>
+            <int name="LayoutOrder">0</int>
+            <Ref name="NextSelectionDown">null</Ref>
+            <Ref name="NextSelectionLeft">null</Ref>
+            <Ref name="NextSelectionRight">null</Ref>
+            <Ref name="NextSelectionUp">null</Ref>
+            <UDim2 name="Position">
+              <XS>-0.05</XS>
+              <XO>0</XO>
+              <YS>-1.25</YS>
+              <YO>0</YO>
+            </UDim2>
+            <Ref name="RootLocalizationTable">null</Ref>
+            <float name="Rotation">0</float>
+            <bool name="DefinesCapabilities">false</bool>
+            <bool name="Selectable">false</bool>
+            <token name="SelectionBehaviorDown">0</token>
+            <token name="SelectionBehaviorLeft">0</token>
+            <token name="SelectionBehaviorRight">0</token>
+            <token name="SelectionBehaviorUp">0</token>
+            <bool name="SelectionGroup">false</bool>
+            <Ref name="SelectionImageObject">null</Ref>
+            <int name="SelectionOrder">0</int>
+            <UDim2 name="Size">
+              <XS>1.1</XS>
+              <XO>0</XO>
+              <YS>3</YS>
+              <YO>0</YO>
+            </UDim2>
+            <token name="SizeConstraint">0</token>
+            <int64 name="SourceAssetId">-1</int64>
+            <token name="Style">0</token>
+            <BinaryString name="Tags"></BinaryString>
+            <bool name="Visible">true</bool>
+            <int name="ZIndex">0</int>
+          </Properties>
+          <Item class="UIStroke" referent="20">
+            <Properties>
+              <string name="Name">UIStroke</string>
+              <token name="ApplyStrokeMode">1</token>
+              <BinaryString name="AttributesSerialize"></BinaryString>
+              <UDim name="BorderOffset">
+                <S>0</S>
+                <O>0</O>
+              </UDim>
+              <token name="BorderStrokePosition">0</token>
+              <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+              <Color3 name="Color">
+                <R>0</R>
+                <G>0</G>
+                <B>0</B>
+              </Color3>
+              <bool name="Enabled">true</bool>
+              <token name="LineJoinMode">0</token>
+              <bool name="DefinesCapabilities">false</bool>
+              <int64 name="SourceAssetId">-1</int64>
+              <token name="StrokeSizingMode">0</token>
+              <BinaryString name="Tags"></BinaryString>
+              <float name="Thickness">10</float>
+              <float name="Transparency">0.5</float>
+              <int name="ZIndex">1</int>
+            </Properties>
+            <Item class="UIGradient" referent="21">
+              <Properties>
+                <string name="Name">UIGradient</string>
+                <BinaryString name="AttributesSerialize"></BinaryString>
+                <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+                <ColorSequence name="Color">0 1 1 1 0 1 1 1 1 0 </ColorSequence>
+                <bool name="Enabled">true</bool>
+                <Vector2 name="Offset">
+                  <X>0</X>
+                  <Y>0</Y>
+                </Vector2>
+                <float name="Rotation">180</float>
+                <bool name="DefinesCapabilities">false</bool>
+                <int64 name="SourceAssetId">-1</int64>
+                <BinaryString name="Tags"></BinaryString>
+                <NumberSequence name="Transparency">0 1 0 1 0.037499964 0 </NumberSequence>
+              </Properties>
+            </Item>
+          </Item>
+        </Item>
+        <Item class="UIPadding" referent="22">
+          <Properties>
+            <string name="Name">UIPadding</string>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <UDim name="PaddingBottom">
+              <S>0</S>
+              <O>4</O>
+            </UDim>
+            <UDim name="PaddingLeft">
+              <S>0</S>
+              <O>5</O>
+            </UDim>
+            <UDim name="PaddingRight">
+              <S>0</S>
+              <O>5</O>
+            </UDim>
+            <UDim name="PaddingTop">
+              <S>0</S>
+              <O>4</O>
+            </UDim>
+            <bool name="DefinesCapabilities">false</bool>
+            <int64 name="SourceAssetId">-1</int64>
+            <BinaryString name="Tags"></BinaryString>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="LocalScript" referent="23">
+        <Properties>
+          <string name="Name">SuspicionController</string>
+          <BinaryString name="AttributesSerialize"></BinaryString>
+          <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+          <bool name="Disabled">false</bool>
+          <ContentId name="LinkedSource">
+            <null>
+            </null>
+          </ContentId>
+          <token name="RunContext">0</token>
+          <bool name="DefinesCapabilities">false</bool>
+          <string name="ScriptGuid">{0B4068A9-62C7-439F-9483-703CB5982F35}</string>
+          <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+
+local SuspicionManager = require(ReplicatedStorage:WaitForChild("SuspicionManager"))
+
+-- calls the files 
+local gui = script.Parent
+local background = gui:FindFirstChild("BackgroundBar", true)
+local fillBar = background:FindFirstChild("FillBar", true)
+local titleLabel = background:FindFirstChild("TitleLabel", true)
+
+
+local neonGlow = gui:FindFirstChild("NeonGlow", true)
+local glowStroke = neonGlow and neonGlow:FindFirstChild("UIStroke", true)
+local uiGradient = glowStroke and glowStroke:FindFirstChild("UIGradient", true)
+
+local COLORS = {
+	SAFE = Color3.fromRGB(0, 255, 150),
+	CAUTION = Color3.fromRGB(255, 200, 0),
+	DANGER = Color3.fromRGB(255, 50, 50)
+}
+
+-- changes the color of the bar and text to match sus level
+SuspicionManager.Changed:Connect(function(newValue)
+	local percent = math.clamp(newValue / 100, 0, 1)
+
+	local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	TweenService:Create(fillBar, tweenInfo, {Size = UDim2.new(percent, 0, 1, 0)}):Play()
+
+
+	local targetColor
+	if percent > 0.8 then
+		targetColor = COLORS.DANGER
+		titleLabel.Text = "!! EXPOSED !!"
+	elseif percent > 0.4 then
+		targetColor = COLORS.CAUTION
+		titleLabel.Text = "SUSPICION: HIGH"
+	else
+		targetColor = COLORS.SAFE
+		titleLabel.Text = "SUSPICION: CLEAR"
+	end
+
+
+	fillBar.BackgroundColor3 = targetColor
+	titleLabel.TextColor3 = targetColor
+
+
+	if neonGlow then
+		neonGlow.Visible = true
+		neonGlow.BackgroundTransparency = 1 
+
+
+		if glowStroke then
+			glowStroke.Color = targetColor
+		end
+
+
+		if uiGradient then
+			uiGradient.Color = ColorSequence.new(targetColor)
+		end
+	end
+end)
+-- Auto decay of the suspicion bar 
+task.spawn(function()
+	while true do
+		task.wait(1) -- Every 1 second
+		-- If suspicion is above 0, lower it by 1 point (Tuning: Section 2.7.3)
+		if SuspicionManager.Get() > 0 then
+			SuspicionManager.Reduce(1) 
+		end
+	end
+end)
+]]></string>
+          <int64 name="SourceAssetId">-1</int64>
+          <BinaryString name="Tags"></BinaryString>
+        </Properties>
+      </Item>
+      <Item class="TextButton" referent="24">
+        <Properties>
+          <string name="Name">IncreaseTest</string>
+          <bool name="Active">true</bool>
+          <Vector2 name="AnchorPoint">
+            <X>0</X>
+            <Y>0</Y>
+          </Vector2>
+          <BinaryString name="AttributesSerialize"></BinaryString>
+          <bool name="AutoButtonColor">true</bool>
+          <bool name="AutoLocalize">true</bool>
+          <token name="AutomaticSize">0</token>
+          <Color3 name="BackgroundColor3">
+            <R>1</R>
+            <G>1</G>
+            <B>1</B>
+          </Color3>
+          <float name="BackgroundTransparency">0</float>
+          <Color3 name="BorderColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <token name="BorderMode">0</token>
+          <int name="BorderSizePixel">0</int>
+          <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+          <bool name="ClipsDescendants">false</bool>
+          <bool name="Draggable">false</bool>
+          <Font name="FontFace">
+            <Family>
+              <url>rbxasset://fonts/families/SourceSansPro.json</url>
+            </Family>
+            <Weight>400</Weight>
+            <Style>Normal</Style>
+            <CachedFaceId>
+              <url>rbxasset://fonts/SourceSansPro-Regular.ttf</url>
+            </CachedFaceId>
+          </Font>
+          <Ref name="HoverHapticEffect">null</Ref>
+          <token name="InputSink">0</token>
+          <bool name="Interactable">true</bool>
+          <int name="LayoutOrder">0</int>
+          <float name="LineHeight">1</float>
+          <string name="LocalizationMatchIdentifier"></string>
+          <string name="LocalizationMatchedSourceText"></string>
+          <int name="MaxVisibleGraphemes">-1</int>
+          <bool name="Modal">false</bool>
+          <Ref name="NextSelectionDown">null</Ref>
+          <Ref name="NextSelectionLeft">null</Ref>
+          <Ref name="NextSelectionRight">null</Ref>
+          <Ref name="NextSelectionUp">null</Ref>
+          <string name="OpenTypeFeatures"></string>
+          <UDim2 name="Position">
+            <XS>0</XS>
+            <XO>0</XO>
+            <YS>0</YS>
+            <YO>0</YO>
+          </UDim2>
+          <Ref name="PressHapticEffect">null</Ref>
+          <bool name="RichText">false</bool>
+          <Ref name="RootLocalizationTable">null</Ref>
+          <float name="Rotation">0</float>
+          <bool name="DefinesCapabilities">false</bool>
+          <bool name="Selectable">true</bool>
+          <bool name="Selected">false</bool>
+          <token name="SelectionBehaviorDown">0</token>
+          <token name="SelectionBehaviorLeft">0</token>
+          <token name="SelectionBehaviorRight">0</token>
+          <token name="SelectionBehaviorUp">0</token>
+          <bool name="SelectionGroup">false</bool>
+          <Ref name="SelectionImageObject">null</Ref>
+          <int name="SelectionOrder">0</int>
+          <UDim2 name="Size">
+            <XS>0</XS>
+            <XO>200</XO>
+            <YS>0</YS>
+            <YO>50</YO>
+          </UDim2>
+          <token name="SizeConstraint">0</token>
+          <int64 name="SourceAssetId">-1</int64>
+          <token name="Style">0</token>
+          <BinaryString name="Tags"></BinaryString>
+          <string name="Text">ADD SUSPICION</string>
+          <Color3 name="TextColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <token name="TextDirection">0</token>
+          <bool name="TextScaled">false</bool>
+          <float name="TextSize">14</float>
+          <Color3 name="TextStrokeColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <float name="TextStrokeTransparency">1</float>
+          <float name="TextTransparency">0</float>
+          <token name="TextTruncate">0</token>
+          <bool name="TextWrapped">false</bool>
+          <token name="TextXAlignment">2</token>
+          <token name="TextYAlignment">1</token>
+          <bool name="Visible">true</bool>
+          <int name="ZIndex">1</int>
+        </Properties>
+        <Item class="LocalScript" referent="25">
+          <Properties>
+            <string name="Name">LocalScript</string>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <bool name="Disabled">false</bool>
+            <ContentId name="LinkedSource">
+              <null>
+              </null>
+            </ContentId>
+            <token name="RunContext">0</token>
+            <bool name="DefinesCapabilities">false</bool>
+            <string name="ScriptGuid">{21FEE947-FF53-4A53-ADE4-B8F1FF90D1EB}</string>
+            <string name="Source"><![CDATA[local SuspicionManager = require(game.ReplicatedStorage.SuspicionManager)
+
+script.Parent.MouseButton1Click:Connect(function()
+	SuspicionManager.Add(10) 
+end)
+]]></string>
+            <int64 name="SourceAssetId">-1</int64>
+            <BinaryString name="Tags"></BinaryString>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="TextButton" referent="26">
+        <Properties>
+          <string name="Name">Hide/SafeTest</string>
+          <bool name="Active">true</bool>
+          <Vector2 name="AnchorPoint">
+            <X>0</X>
+            <Y>0</Y>
+          </Vector2>
+          <BinaryString name="AttributesSerialize"></BinaryString>
+          <bool name="AutoButtonColor">true</bool>
+          <bool name="AutoLocalize">true</bool>
+          <token name="AutomaticSize">0</token>
+          <Color3 name="BackgroundColor3">
+            <R>1</R>
+            <G>1</G>
+            <B>1</B>
+          </Color3>
+          <float name="BackgroundTransparency">0</float>
+          <Color3 name="BorderColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <token name="BorderMode">0</token>
+          <int name="BorderSizePixel">0</int>
+          <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+          <bool name="ClipsDescendants">false</bool>
+          <bool name="Draggable">false</bool>
+          <Font name="FontFace">
+            <Family>
+              <url>rbxasset://fonts/families/SourceSansPro.json</url>
+            </Family>
+            <Weight>400</Weight>
+            <Style>Normal</Style>
+            <CachedFaceId>
+              <url>rbxasset://fonts/SourceSansPro-Regular.ttf</url>
+            </CachedFaceId>
+          </Font>
+          <Ref name="HoverHapticEffect">null</Ref>
+          <token name="InputSink">0</token>
+          <bool name="Interactable">true</bool>
+          <int name="LayoutOrder">0</int>
+          <float name="LineHeight">1</float>
+          <string name="LocalizationMatchIdentifier"></string>
+          <string name="LocalizationMatchedSourceText"></string>
+          <int name="MaxVisibleGraphemes">-1</int>
+          <bool name="Modal">false</bool>
+          <Ref name="NextSelectionDown">null</Ref>
+          <Ref name="NextSelectionLeft">null</Ref>
+          <Ref name="NextSelectionRight">null</Ref>
+          <Ref name="NextSelectionUp">null</Ref>
+          <string name="OpenTypeFeatures"></string>
+          <UDim2 name="Position">
+            <XS>0</XS>
+            <XO>0</XO>
+            <YS>0.1</YS>
+            <YO>0</YO>
+          </UDim2>
+          <Ref name="PressHapticEffect">null</Ref>
+          <bool name="RichText">true</bool>
+          <Ref name="RootLocalizationTable">null</Ref>
+          <float name="Rotation">0</float>
+          <bool name="DefinesCapabilities">false</bool>
+          <bool name="Selectable">true</bool>
+          <bool name="Selected">false</bool>
+          <token name="SelectionBehaviorDown">0</token>
+          <token name="SelectionBehaviorLeft">0</token>
+          <token name="SelectionBehaviorRight">0</token>
+          <token name="SelectionBehaviorUp">0</token>
+          <bool name="SelectionGroup">false</bool>
+          <Ref name="SelectionImageObject">null</Ref>
+          <int name="SelectionOrder">0</int>
+          <UDim2 name="Size">
+            <XS>0</XS>
+            <XO>200</XO>
+            <YS>0</YS>
+            <YO>50</YO>
+          </UDim2>
+          <token name="SizeConstraint">0</token>
+          <int64 name="SourceAssetId">-1</int64>
+          <token name="Style">0</token>
+          <BinaryString name="Tags"></BinaryString>
+          <string name="Text">SAFE/DECREASE TEST</string>
+          <Color3 name="TextColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <token name="TextDirection">0</token>
+          <bool name="TextScaled">false</bool>
+          <float name="TextSize">14</float>
+          <Color3 name="TextStrokeColor3">
+            <R>0</R>
+            <G>0</G>
+            <B>0</B>
+          </Color3>
+          <float name="TextStrokeTransparency">1</float>
+          <float name="TextTransparency">0</float>
+          <token name="TextTruncate">0</token>
+          <bool name="TextWrapped">false</bool>
+          <token name="TextXAlignment">2</token>
+          <token name="TextYAlignment">1</token>
+          <bool name="Visible">true</bool>
+          <int name="ZIndex">1</int>
+        </Properties>
+        <Item class="LocalScript" referent="27">
+          <Properties>
+            <string name="Name">LocalScript</string>
+            <BinaryString name="AttributesSerialize"></BinaryString>
+            <SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+            <bool name="Disabled">false</bool>
+            <ContentId name="LinkedSource">
+              <null>
+              </null>
+            </ContentId>
+            <token name="RunContext">0</token>
+            <bool name="DefinesCapabilities">false</bool>
+            <string name="ScriptGuid">{5925BDA5-6BF5-4D26-ACBA-1A3B457FC73B}</string>
+            <string name="Source"><![CDATA[local SuspicionManager = require(game.ReplicatedStorage.SuspicionManager)
+
+script.Parent.MouseButton1Click:Connect(function()
+
+	SuspicionManager.Reduce(10) 
+end)
+]]></string>
+            <int64 name="SourceAssetId">-1</int64>
+            <BinaryString name="Tags"></BinaryString>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="28">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="29">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="30">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[local controller = script.Parent:WaitForChild("SuspicionController")
+require(controller).init()
+]]></string>
+        </Properties>
+        <Item class="ModuleScript" referent="31">
+          <Properties>
+            <string name="Name">SuspicionController</string>
+            <string name="Source">-- SuspicionController.lua (FULL UPDATED VERSION - Copy &amp; Paste this entire thing)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionController")) -- wait, no - this is the controller itself
+
+local SuspicionController = {}
+
+local COLORS = {
+	SAFE = Color3.fromRGB(0, 255, 150),
+	CAUTION = Color3.fromRGB(255, 200, 0),
+	DANGER = Color3.fromRGB(255, 50, 50),
+}
+
+local fillBar
+local titleLabel
+local glowStroke
+local uiGradient
+local isInitialized = false
+
+local function ensureGui()
+	local screenGui = playerGui:WaitForChild("SuspicionGUI", 15)  -- longer timeout + no instant fail
+	if not screenGui then
+		warn("[SuspicionController] SuspicionGUI not found in PlayerGui AFTER 15s wait!")
+		return false
+	end
+
+	print("[SuspicionController] Found SuspicionGUI — now checking children...")
+
+	local background = screenGui:FindFirstChild("BackgroundBar", true)
+	if not background then
+		warn("[SuspicionController] BackgroundBar missing inside SuspicionGUI")
+		return false
+	end
+
+	fillBar = background:FindFirstChild("FillBar", true)
+	titleLabel = background:FindFirstChild("TitleLabel", true)
+
+	if not fillBar then
+		warn("[SuspicionController] FillBar missing")
+		return false
+	end
+	if not titleLabel then
+		warn("[SuspicionController] TitleLabel missing")
+		return false
+	end
+
+	-- Neon glow (exactly as you had before)
+	local neonGlow = background:FindFirstChild("NeonGlow", true)
+	if neonGlow then
+		glowStroke = neonGlow:FindFirstChildWhichIsA("UIStroke", true)
+	end
+
+	if glowStroke then
+		uiGradient = glowStroke:FindFirstChildWhichIsA("UIGradient", true)
+	end
+
+	print("[SuspicionController] All GUI elements found and hooked up!")
+	return true
+end
+
+local function render(newValue)
+	if not fillBar or not titleLabel then
+		return
+	end
+
+	local percent = math.clamp((tonumber(newValue) or 0) / 100, 0, 1)
+	local tweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+	TweenService:Create(fillBar, tweenInfo, {
+		Size = UDim2.new(percent, 0, fillBar.Size.Y.Scale, fillBar.Size.Y.Offset),
+	}):Play()
+
+	local targetColor
+	if percent &gt; 0.8 then
+		targetColor = COLORS.DANGER
+		titleLabel.Text = "SUSPICION: EXPOSED"
+	elseif percent &gt; 0.4 then
+		targetColor = COLORS.CAUTION
+		titleLabel.Text = "SUSPICION: WARNING"
+	else
+		targetColor = COLORS.SAFE
+		titleLabel.Text = "SUSPICION: CLEAR"
+	end
+
+	fillBar.BackgroundColor3 = targetColor
+	titleLabel.TextColor3 = targetColor
+
+	if glowStroke then
+		glowStroke.Color = targetColor
+	end
+
+	if uiGradient then
+		uiGradient.Color = ColorSequence.new(targetColor)
+	end
+end
+
+function SuspicionController.init()
+	if isInitialized then
+		return SuspicionController
+	end
+
+	if not ensureGui() then
+		warn("[SuspicionController] GUI setup failed - check hierarchy and names")
+		return SuspicionController
+	end
+
+	SuspicionManager.Changed:Connect(render)
+	render(SuspicionManager.Get())
+
+	isInitialized = true
+	print("[SuspicionController] Fully initialized and ready!")
+	return SuspicionController
+end
+
+return SuspicionController</string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="32">
+          <Properties>
+            <string name="Name">start</string>
+            <string name="Source"><![CDATA[-- FULLSCREEN AUTO-BUILT TITLE SCREEN
+-- Just drop this LocalScript into StarterPlayerScripts or StarterGui
+
+-- Rewrite this entire thing
+
+local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+---------------------------------------------------------
+-- CREATE SCREEN GUI
+---------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "TitleScreen"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+---------------------------------------------------------
+-- HELPER: CREATE A CENTERED PANEL
+---------------------------------------------------------
+local function createPanel(name)
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.Size = UDim2.new(0.5, 0, 0.55, 0)
+	frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+	frame.BackgroundTransparency = 0.1
+	frame.Visible = false
+	frame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 16)
+	corner.Parent = frame
+
+	return frame
+end
+
+---------------------------------------------------------
+-- MAIN MENU PANEL
+---------------------------------------------------------
+local mainFrame = createPanel("MainFrame")
+mainFrame.Visible = true
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 70)
+title.Position = UDim2.new(0, 0, 0, 10)
+title.BackgroundTransparency = 1
+title.Text = "Undercover: Data Compromised"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
+
+local buttonHolder = Instance.new("Frame")
+buttonHolder.Size = UDim2.new(1, -40, 0, 160)
+buttonHolder.Position = UDim2.new(0.5, 0, 0.45, 0)
+buttonHolder.AnchorPoint = Vector2.new(0.5, 0)
+buttonHolder.BackgroundTransparency = 1
+buttonHolder.Parent = mainFrame
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 10)
+list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+list.Parent = buttonHolder
+
+local function makeButton(text)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(1, 0, 0, 45)
+	button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	button.Text = text
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.TextScaled = true
+	button.Font = Enum.Font.GothamSemibold
+	button.Parent = buttonHolder
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = button
+
+	return button
+end
+
+local startButton   = makeButton("Start Mission")
+local settingsButton = makeButton("Settings")
+local helpButton    = makeButton("Help")
+
+---------------------------------------------------------
+-- SETTINGS PANEL
+---------------------------------------------------------
+local settingsFrame = createPanel("SettingsFrame")
+
+local stitle = Instance.new("TextLabel")
+stitle.Size = UDim2.new(1, 0, 0, 50)
+stitle.Position = UDim2.new(0, 0, 0, 10)
+stitle.BackgroundTransparency = 1
+stitle.Text = "Settings"
+stitle.TextColor3 = Color3.new(1, 1, 1)
+stitle.TextScaled = true
+stitle.Font = Enum.Font.GothamBold
+stitle.Parent = settingsFrame
+
+local function makeVolumeRow(labelText)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(0.85, 0, 0, 50)
+	row.BackgroundTransparency = 1
+	row.Parent = settingsFrame
+
+	local layout = settingsFrame:FindFirstChild("UIListLayout")
+	if not layout then
+		layout = Instance.new("UIListLayout")
+		layout.Padding = UDim.new(0, 10)
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.VerticalAlignment = Enum.VerticalAlignment.Center
+		layout.Parent = settingsFrame
+	end
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(0.6, 0, 1, 0)
+	lbl.Position = UDim2.new(0, 0, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = labelText .. " (0–100)"
+	lbl.TextColor3 = Color3.new(1, 1, 1)
+	lbl.TextScaled = true
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = row
+
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(0.35, 0, 1, 0)
+	box.Position = UDim2.new(0.65, 0, 0, 0)
+	box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	box.Text = "50"
+	box.TextScaled = true
+	box.Font = Enum.Font.Gotham
+	box.TextColor3 = Color3.new(1, 1, 1)
+	box.Parent = row
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = box
+
+	return box
+end
+
+local masterBox = makeVolumeRow("Master Volume")
+local sfxBox = makeVolumeRow("SFX Volume")
+
+local settingsBack = Instance.new("TextButton")
+settingsBack.Size = UDim2.new(0.5, 0, 0, 40)
+settingsBack.AnchorPoint = Vector2.new(0.5, 1)
+settingsBack.Position = UDim2.new(0.5, 0, 0.95, 0)
+settingsBack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+settingsBack.Text = "Back"
+settingsBack.TextColor3 = Color3.new(1, 1, 1)
+settingsBack.TextScaled = true
+settingsBack.Font = Enum.Font.GothamSemibold
+settingsBack.Parent = settingsFrame
+do
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = settingsBack
+end
+
+---------------------------------------------------------
+-- HELP PANEL
+---------------------------------------------------------
+local helpFrame = createPanel("HelpFrame")
+
+local htitle = Instance.new("TextLabel")
+htitle.Size = UDim2.new(1, 0, 0, 50)
+htitle.Position = UDim2.new(0, 0, 0, 10)
+htitle.BackgroundTransparency = 1
+htitle.Text = "Mission Briefing"
+htitle.TextColor3 = Color3.new(1, 1, 1)
+htitle.TextScaled = true
+htitle.Font = Enum.Font.GothamBold
+htitle.Parent = helpFrame
+
+local body = Instance.new("TextLabel")
+body.Size = UDim2.new(0.9, 0, 0.65, 0)
+body.Position = UDim2.new(0.5, 0, 0.55, 0)
+body.AnchorPoint = Vector2.new(0.5, 0.5)
+body.BackgroundTransparency = 1
+body.TextColor3 = Color3.new(1, 1, 1)
+body.TextWrapped = true
+body.TextYAlignment = Enum.TextYAlignment.Top
+body.Font = Enum.Font.Gotham
+body.Text = [[
+You are contacted by an undercover cybersecurity professional.
+
+Their agency is under heavy controversy. Someone inside the organization
+is leaking confidential data, repeatedly and intentionally.
+
+Your objectives:
+• Identify WHO is leaking the data
+• Determine WHAT they leaked
+• Figure out HOW they are doing it
+
+Use your in-game tablet to hack systems, analyze logs, and uncover the truth.
+]]
+body.TextScaled = false
+body.TextSize = 18
+body.Parent = helpFrame
+
+local helpBack = Instance.new("TextButton")
+helpBack.Size = UDim2.new(0.5, 0, 0, 40)
+helpBack.AnchorPoint = Vector2.new(0.5, 1)
+helpBack.Position = UDim2.new(0.5, 0, 0.95, 0)
+helpBack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+helpBack.Text = "Back"
+helpBack.TextColor3 = Color3.new(1, 1, 1)
+helpBack.TextScaled = true
+helpBack.Font = Enum.Font.GothamSemibold
+helpBack.Parent = helpFrame
+do
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = helpBack
+end
+
+---------------------------------------------------------
+-- MENU SWITCHING
+---------------------------------------------------------
+local function showMain()
+	mainFrame.Visible = true
+	settingsFrame.Visible = false
+	helpFrame.Visible = false
+end
+
+local function showSettings()
+	mainFrame.Visible = false
+	settingsFrame.Visible = true
+	helpFrame.Visible = false
+end
+
+local function showHelp()
+	mainFrame.Visible = false
+	settingsFrame.Visible = false
+	helpFrame.Visible = true
+end
+
+---------------------------------------------------------
+-- SOUND CONTROL
+---------------------------------------------------------
+local function applyVolume()
+	local m = tonumber(masterBox.Text) or 50
+	local s = tonumber(sfxBox.Text) or 50
+	SoundService.Volume = math.clamp(m / 100, 0, 1)
+	SoundService:SetAttribute("SFXVolume", math.clamp(s / 100, 0, 1))
+end
+
+masterBox.FocusLost:Connect(applyVolume)
+sfxBox.FocusLost:Connect(applyVolume)
+
+---------------------------------------------------------
+-- CUTSCENE CALL
+---------------------------------------------------------
+local function startCutscene()
+	local evt = ReplicatedStorage:FindFirstChild("StartNewsCutscene")
+	if evt then
+		evt:FireServer()
+	else
+		warn("StartNewsCutscene RemoteEvent missing in ReplicatedStorage!")
+	end
+end
+
+---------------------------------------------------------
+-- BUTTON CONNECTIONS
+---------------------------------------------------------
+startButton.MouseButton1Click:Connect(function()
+	screenGui.Enabled = false
+	startCutscene()
+end)
+
+settingsButton.MouseButton1Click:Connect(showSettings)
+helpButton.MouseButton1Click:Connect(showHelp)
+settingsBack.MouseButton1Click:Connect(showMain)
+helpBack.MouseButton1Click:Connect(showMain)
+
+showMain()
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="33">
+          <Properties>
+            <string name="Name">tablet</string>
+            <string name="Source"><![CDATA[-- HackTablet OS (StarterPlayerScripts) - FULL CODE
+-- Fix included: URL box typing no longer gets focus stolen by terminal
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local CAS = game:GetService("ContextActionService")
+local StarterGui = game:GetService("StarterGui")
+local Http = game:GetService("HttpService")
+local Tween = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local ContentProvider = game:GetService("ContentProvider")
+local RunService = game:GetService("RunService")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+local TOOL_NAME = "HackTablet"
+local Tool = nil
+
+local PROMPT = "rbxplayer@hackos:~$ "
+local AUDIO_TAG = "HackTablet_Audio"
+local E_BIND = "HackTablet_E_Block"
+local BLUR_NAME = "HackStartBlur"
+
+local SAVE_KEYS = { "Obj_Admin", "TimesLeaked" }
+
+local isEquipped = false
+local started = false
+local MainGUI, HintGUI
+local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel
+
+local DEBUG = true
+
+local function notify(t)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", t)
+	end)
+end
+
+local function dbg(msg)
+	if not DEBUG then return end
+	warn("[HackTablet]", msg)
+	notify({ Title = "HackTablet (debug)", Text = tostring(msg), Duration = 2 })
+end
+
+local function mk(t, p)
+	local i = Instance.new(t)
+	for k, v in pairs(p or {}) do
+		i[k] = v
+	end
+	return i
+end
+
+local function round(o, r)
+	mk("UICorner", { Parent = o, CornerRadius = UDim.new(0, r or 10) })
+end
+
+local function fadeVol(s, v, d)
+	if not s then return end
+	pcall(function()
+		Tween:Create(s, TweenInfo.new(d or 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+			Volume = math.clamp(v, 0, 10),
+		}):Play()
+	end)
+end
+
+notify({ Title = "SIMULATION WARNING", Text = "Simulated interface. Do not replicate in real life.", Duration = 5 })
+
+pcall(function()
+	if Player:GetAttribute("HasKeycardData") ~= nil then
+		Player:SetAttribute("HasKeycardData", nil)
+	end
+end)
+
+local function getSound()
+	local s = SoundService:FindFirstChild(AUDIO_TAG)
+	if s and s:IsA("Sound") then
+		return s
+	end
+	s = mk("Sound", {
+		Name = AUDIO_TAG,
+		SoundId = "rbxassetid://74606780873749",
+		Volume = 0,
+		Looped = false,
+		Parent = SoundService,
+	})
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync({ s })
+		end)
+	end)
+	return s
+end
+
+local function playAudio()
+	local s = getSound()
+	if not s.IsPlaying then
+		s.TimePosition = 0
+		s:Play()
+	end
+	fadeVol(s, 0.95, 0.4)
+end
+
+local function stopAudio()
+	local s = SoundService:FindFirstChild(AUDIO_TAG)
+	if not s then return end
+	fadeVol(s, 0, 0.25)
+	task.delay(0.3, function()
+		if s and s.IsPlaying then
+			s:Stop()
+		end
+	end)
+end
+
+local function isToolEquipped()
+	local c = Player.Character
+	return (Tool and c and Tool.Parent == c) or isEquipped
+end
+
+local function setEquipped(on)
+	isEquipped = on
+	Player:SetAttribute("HackTabletEquipped", on)
+end
+
+local function saveNow()
+	local out = {}
+	for _, k in ipairs(SAVE_KEYS) do
+		local v = Player:GetAttribute(k)
+		if v ~= nil then
+			out[k] = v
+		end
+	end
+	Player:SetAttribute("SaveBlob", Http:JSONEncode(out))
+	notify({ Title = "HackTablet", Text = "Progress saved.", Duration = 2 })
+end
+
+local function loadNow()
+	local raw = Player:GetAttribute("SaveBlob")
+	if type(raw) ~= "string" or #raw == 0 then
+		return
+	end
+	local ok, data = pcall(function()
+		return Http:JSONDecode(raw)
+	end)
+	if not ok or type(data) ~= "table" then
+		return
+	end
+	for k, v in pairs(data) do
+		Player:SetAttribute(k, v)
+	end
+	notify({ Title = "HackTablet", Text = "Progress loaded.", Duration = 2 })
+end
+
+local function teardownStart()
+	local blur = Lighting:FindFirstChild(BLUR_NAME)
+	if blur then blur:Destroy() end
+	local boot = PlayerGui:FindFirstChild("HackStart")
+	if boot then boot:Destroy() end
+end
+
+local function addLine(txt)
+	mk("TextLabel", {
+		Parent = TermOut,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Code,
+		TextSize = 15,
+		TextColor3 = Color3.fromRGB(172, 255, 198),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, -10, 0, 0),
+		Text = txt,
+	})
+	task.defer(function()
+		local layout = TermOut:FindFirstChild("UIListLayout")
+		if layout then
+			TermOut.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+			TermOut.CanvasPosition = Vector2.new(0, math.huge)
+		end
+	end)
+end
+
+local PAGES = {
+	["hackos://home"] =
+		"Welcome to HackOS (SIM)\n\nTry:\n- help\n- apps\n- missions\n- tips\n\nThis is a learning/simulation UI.",
+
+	["hackos://tips"] =
+		"Safety Tips (SIM)\n\n- Use strong passwords\n- Turn on 2FA\n- Do not click weird links\n- Ask an adult if unsure",
+
+	["hackos://missions"] =
+		"Missions (SIM)\n1) password-check\n2) phish-spotter\n3) safe-browsing\n\nType: mission <name>",
+
+	["hackos://apps"] =
+		"Apps (SIM)\n- Terminal\n- Browser\n- Notes (soon)\n\nType: open <app>",
+
+	["bloxplay.com/admin"] =
+		"BLOXPLAY ADMIN (SIM)\n\nLogin is simulated.\nHint: `admin on` in terminal.",
+
+	["www.bloxplay.com/admin"] =
+		"BLOXPLAY ADMIN (SIM)\n\nLogin is simulated.\nHint: `admin on` in terminal.",
+
+	["bloxplay.com/admin/employees"] =
+		"Employees (SIM)\n- rick_dev\n- novaplayz\n- marcus_lee\n- junpark",
+
+	["www.bloxplay.com/admin/employees"] =
+		"Employees (SIM)\n- rick_dev\n- novaplayz\n- marcus_lee\n- junpark",
+}
+
+local function normalizeUrl(url)
+	local u = tostring(url or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if u == "" then return "about:blank" end
+	local low = u:lower()
+
+	if low == "home" then return "hackos://home" end
+	if low == "tips" then return "hackos://tips" end
+	if low == "missions" then return "hackos://missions" end
+	if low == "apps" then return "hackos://apps" end
+
+	if low:sub(1, 8) == "hackos://" then
+		return low
+	end
+
+	low = low:gsub("^https?://", ""):gsub("/+$", "")
+	return low
+end
+
+local function navigateTo(url)
+	local uNorm = normalizeUrl(url)
+
+	if uNorm == "about:blank" then
+		PageLabel.Text = ""
+		return
+	end
+
+	if uNorm == "bloxplay.com/admin/employees" or uNorm == "www.bloxplay.com/admin/employees" then
+		local base = PAGES[uNorm] or ""
+		if Player:GetAttribute("Obj_Admin") then
+			base ..= "\n\n[Admin Mode: ON] (sim)"
+		end
+		PageLabel.Text = base
+		return
+	end
+
+	PageLabel.Text = PAGES[uNorm] or ('No renderer for "%s" (sim).'):format(url)
+end
+
+local function showHelp()
+	addLine("Kid-friendly SIM commands:")
+	addLine("help                        - show this list")
+	addLine("apps                        - list apps")
+	addLine("open <terminal|browser|notes> - switch screens")
+	addLine("visit <url|home|tips|missions|apps> - open a page (sim)")
+	addLine("ping <thing>                - check if something is reachable (sim)")
+	addLine("scan <place>                - safety scan (sim)")
+	addLine("phish <text>                - spot phishing clues (sim)")
+	addLine("password <text>             - password strength check (sim)")
+	addLine("mission <name>              - run a learning mission (sim)")
+	addLine("admin <on|off>              - toggle admin mode (sim)")
+	addLine("save | load                 - save/load progress")
+	addLine("clear                        - clear terminal")
+	addLine("time                         - show time")
+end
+
+local function phishCheck(text)
+	local t = (text or ""):lower()
+	local flags = 0
+	local clues = {}
+
+	local function flag(clue)
+		flags += 1
+		table.insert(clues, "- " .. clue)
+	end
+
+	if t:find("urgent") or t:find("immediately") then flag("It tries to rush you (pressure).") end
+	if t:find("password") or t:find("verify") then flag("Asks for passwords or verification.") end
+	if t:find("free") or t:find("winner") or t:find("prize") then flag("Too-good-to-be-true reward.") end
+	if t:find("gift card") then flag("Gift card request is a common scam.") end
+	if t:find("click") and (t:find("link") or t:find("http")) then flag("Wants you to click a link.") end
+
+	if flags == 0 then
+		addLine("Phish check (sim): looks okay, but always be careful.")
+	else
+		addLine(("Phish check (sim): %d suspicious clue(s) found:"):format(flags))
+		for _, c in ipairs(clues) do addLine(c) end
+	end
+end
+
+local function passwordCheck(pw)
+	local s = tostring(pw or "")
+	if #s == 0 then
+		addLine("Try: password MyCoolPass123!")
+		return
+	end
+
+	local score = 0
+	if #s >= 12 then score += 2 elseif #s >= 8 then score += 1 end
+	if s:match("%d") then score += 1 end
+	if s:match("%l") and s:match("%u") then score += 1 end
+	if s:match("[%p%W_]") then score += 1 end
+
+	if score <= 1 then
+		addLine("Password check (sim): weak")
+		addLine("Tip: use 12+ chars, mix letters/numbers/symbols.")
+	elseif score <= 3 then
+		addLine("Password check (sim): okay")
+		addLine("Tip: longer is stronger. Try a fun passphrase.")
+	else
+		addLine("Password check (sim): strong")
+	end
+end
+
+local function handle(cmdLine)
+	local raw = tostring(cmdLine or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	addLine(PROMPT .. raw)
+
+	local args = {}
+	for w in raw:gmatch("%S+") do
+		args[#args + 1] = w
+	end
+	local cmd = (args[1] or ""):lower()
+
+	if cmd == "" then
+		addLine(PROMPT)
+		return
+	end
+
+	local function rest(from)
+		local t = {}
+		for i = from, #args do t[#t+1] = args[i] end
+		return table.concat(t, " ")
+	end
+
+	if cmd == "help" then
+		showHelp()
+
+	elseif cmd == "apps" then
+		addLine("Apps (SIM): terminal, browser, notes (soon)")
+		addLine("Tip: open browser")
+
+	elseif cmd == "open" then
+		local which = (args[2] or ""):lower()
+		if which == "terminal" then
+			TermFrame.Visible = true
+			BrowserFrame.Visible = false
+			if TermInput then TermInput:CaptureFocus() end
+			addLine("Switched to Terminal.")
+		elseif which == "browser" then
+			TermFrame.Visible = false
+			BrowserFrame.Visible = true
+			addLine("Switched to Browser.")
+			if UrlBox and UrlBox.Text == "" then
+				UrlBox.Text = "home"
+				navigateTo("home")
+			end
+			pcall(function() UrlBox:CaptureFocus() end)
+		elseif which == "notes" then
+			addLine("Notes app (sim) coming soon")
+		else
+			addLine("Try: open terminal OR open browser")
+		end
+
+	elseif cmd == "visit" then
+		local target = rest(2)
+		addLine("Opening " .. (target ~= "" and target or "about:blank") .. " ... (sim)")
+		if UrlBox then UrlBox.Text = target end
+		navigateTo(target)
+
+	elseif cmd == "ping" then
+		local target = rest(2)
+		if target == "" then target = "server" end
+		addLine(("Pinging %s ... (sim)"):format(target))
+		addLine("Reply from " .. target .. ": time=12ms (sim)")
+
+	elseif cmd == "scan" then
+		local where = rest(2)
+		if where == "" then where = "this device" end
+		addLine(("Running safety scan on %s ... (sim)"):format(where))
+		addLine("Result: 0 threats found (sim)")
+
+	elseif cmd == "phish" then
+		phishCheck(rest(2))
+
+	elseif cmd == "password" then
+		passwordCheck(rest(2))
+
+	elseif cmd == "mission" then
+		local name = (args[2] or ""):lower()
+		if name == "" then
+			addLine("Try: mission phish-spotter")
+		elseif name == "phish-spotter" then
+			addLine("Mission: Phish Spotter (SIM)")
+			addLine("Try: phish \"URGENT! Click link to win a prize\"")
+		elseif name == "password-check" then
+			addLine("Mission: Password Check (SIM)")
+			addLine("Try: password MyCoolPass123!")
+		elseif name == "safe-browsing" then
+			addLine("Mission: Safe Browsing (SIM)")
+			addLine("Tip: Only visit pages you trust.")
+		else
+			addLine("Unknown mission. Try: visit missions OR mission phish-spotter")
+		end
+
+	elseif cmd == "admin" then
+		local on = (args[2] or ""):lower() == "on"
+		Player:SetAttribute("Obj_Admin", on)
+		addLine("Admin mode (sim) = " .. tostring(on))
+
+	elseif cmd == "save" then
+		saveNow()
+	elseif cmd == "load" then
+		loadNow()
+
+	elseif cmd == "time" then
+		addLine(os.date("%Y-%m-%d %H:%M:%S"))
+
+	elseif cmd == "clear" or cmd == "reset" then
+		TermOut:ClearAllChildren()
+		mk("UIListLayout", { Parent = TermOut, Name = "UIListLayout", Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
+		addLine(PROMPT)
+		return
+
+	else
+		addLine("I do not know that command. Type: help")
+	end
+
+	addLine(PROMPT)
+end
+
+local function buildMainUI()
+	local gui = mk("ScreenGui", { Parent = PlayerGui, Name = "TabletGUI", IgnoreGuiInset = true, ResetOnSpawn = false, Enabled = false })
+	local desktop = mk("Frame", { Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(10, 14, 22) })
+	mk("UIGradient", {
+		Parent = desktop,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(23, 34, 58)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(7, 10, 16)),
+		}),
+		Rotation = 120,
+	})
+
+	local top = mk("Frame", { Parent = desktop, Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = Color3.fromRGB(17, 22, 32), BackgroundTransparency = 0.08 })
+	mk("TextLabel", {
+		Parent = top,
+		BackgroundTransparency = 1,
+		Text = "HackOS v1.4",
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(220, 236, 255),
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.fromOffset(180, 50),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	ClockLabel = mk("TextLabel", {
+		Parent = top,
+		BackgroundTransparency = 1,
+		Text = "--:--:--",
+		Font = Enum.Font.Code,
+		TextSize = 15,
+		TextColor3 = Color3.fromRGB(190, 208, 240),
+		Position = UDim2.new(1, -170, 0, 0),
+		Size = UDim2.fromOffset(160, 50),
+		TextXAlignment = Enum.TextXAlignment.Right,
+	})
+
+	local function button(text, x, w)
+		local b = mk("TextButton", {
+			Parent = top,
+			Text = text,
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 14,
+			TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = Color3.fromRGB(45, 57, 84),
+			Size = UDim2.fromOffset(w or 92, 30),
+			Position = UDim2.new(0, x, 0, 10),
+		})
+		round(b, 9)
+		return b
+	end
+
+	local bTerm = button("Terminal", 200)
+	local bBrowser = button("Browser", 300)
+	local bSave = button("Save", 400, 72)
+	local bLoad = button("Load", 478, 72)
+	local bClose = button("Close", 556, 72)
+
+	local pad = mk("Frame", {
+		Parent = desktop,
+		Position = UDim2.new(0, 14, 0, 64),
+		Size = UDim2.new(1, -28, 1, -78),
+		BackgroundColor3 = Color3.fromRGB(15, 19, 28),
+		BackgroundTransparency = 0.1,
+	})
+	round(pad, 14)
+
+	TermFrame = mk("Frame", {
+		Parent = pad,
+		BackgroundColor3 = Color3.fromRGB(11, 14, 18),
+		Size = UDim2.new(0.52, -6, 1, -12),
+		Position = UDim2.new(0, 6, 0, 6),
+	})
+	BrowserFrame = mk("Frame", {
+		Parent = pad,
+		BackgroundColor3 = Color3.fromRGB(236, 238, 243),
+		Size = UDim2.new(0.48, -6, 1, -12),
+		Position = UDim2.new(0.52, 0, 0, 6),
+		Visible = false,
+	})
+	round(TermFrame, 12)
+	round(BrowserFrame, 12)
+
+	TermOut = mk("ScrollingFrame", {
+		Parent = TermFrame,
+		BackgroundColor3 = Color3.fromRGB(8, 10, 13),
+		BorderSizePixel = 0,
+		ScrollBarThickness = 6,
+		Size = UDim2.new(1, -16, 1, -78),
+		Position = UDim2.new(0, 8, 0, 8),
+	})
+	round(TermOut, 10)
+	mk("UIListLayout", {
+		Parent = TermOut,
+		Name = "UIListLayout",
+		Padding = UDim.new(0, 4),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	})
+
+	local h = UIS.TouchEnabled and 40 or 32
+	TermInput = mk("TextBox", {
+		Parent = TermFrame,
+		Text = "",
+		ClearTextOnFocus = true,
+		PlaceholderText = "Type command...",
+		Font = Enum.Font.Code,
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(172, 255, 198),
+		BackgroundColor3 = Color3.fromRGB(8, 10, 13),
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, -(UIS.TouchEnabled and 112 or 16), 0, h),
+		Position = UDim2.new(0, 8, 1, -(8 + h)),
+	})
+	round(TermInput, 9)
+
+	if UIS.TouchEnabled then
+		local run = mk("TextButton", {
+			Parent = TermFrame,
+			Text = "Run",
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 16,
+			TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = Color3.fromRGB(72, 126, 255),
+			Size = UDim2.fromOffset(90, h),
+			Position = UDim2.new(1, -98, 1, -(8 + h)),
+		})
+		round(run, 9)
+		run.MouseButton1Click:Connect(function()
+			local c = TermInput.Text
+			TermInput.Text = ""
+			handle(c)
+			task.defer(function()
+				if TermInput and TermInput.Parent and TermFrame.Visible then
+					TermInput:CaptureFocus()
+				end
+			end)
+		end)
+	end
+
+	UrlBox = mk("TextBox", {
+		Parent = BrowserFrame,
+		Text = "",
+		PlaceholderText = "home (or type a URL)",
+		Font = Enum.Font.Gotham,
+		TextSize = 15,
+		TextColor3 = Color3.new(0, 0, 0),
+		BackgroundColor3 = Color3.fromRGB(223, 227, 236),
+		Size = UDim2.new(1, -88, 0, 32),
+		Position = UDim2.new(0, 8, 0, 8),
+	})
+	round(UrlBox, 8)
+
+	local goBtn = mk("TextButton", {
+		Parent = BrowserFrame,
+		Text = "GO",
+		Font = Enum.Font.GothamSemibold,
+		TextSize = 14,
+		TextColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Color3.fromRGB(79, 131, 255),
+		Size = UDim2.fromOffset(64, 32),
+		Position = UDim2.new(1, -72, 0, 8),
+	})
+	round(goBtn, 8)
+
+	PageLabel = mk("TextLabel", {
+		Parent = BrowserFrame,
+		BackgroundTransparency = 1,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Font = Enum.Font.Gotham,
+		TextSize = 16,
+		TextColor3 = Color3.new(0, 0, 0),
+		Text = "",
+		Size = UDim2.new(1, -16, 1, -48),
+		Position = UDim2.new(0, 8, 0, 44),
+	})
+
+	goBtn.MouseButton1Click:Connect(function()
+		navigateTo(UrlBox.Text)
+	end)
+
+	UIS.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		if input.KeyCode ~= Enum.KeyCode.Return and input.KeyCode ~= Enum.KeyCode.KeypadEnter then return end
+
+		local focused = nil
+		pcall(function() focused = UIS:GetFocusedTextBox() end)
+		if focused == UrlBox then
+			navigateTo(UrlBox.Text)
+		end
+	end)
+
+	UrlBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			navigateTo(UrlBox.Text)
+		end
+	end)
+
+	-- FIX: Do not force terminal focus when browser is open or another textbox is focused.
+	local function canRefocusTerminal()
+		if not (MainGUI and MainGUI.Enabled) then return false end
+		if not (TermFrame and TermFrame.Visible) then return false end
+		if not (TermInput and TermInput.Parent) then return false end
+		if not (isToolEquipped() and started) then return false end
+		local focused = nil
+		pcall(function() focused = UIS:GetFocusedTextBox() end)
+		return focused == nil or focused == TermInput
+	end
+
+	TermInput.FocusLost:Connect(function(enter)
+		if enter then
+			local c = TermInput.Text
+			TermInput.Text = ""
+			handle(c)
+		end
+		task.defer(function()
+			if canRefocusTerminal() then
+				TermInput:CaptureFocus()
+			end
+		end)
+	end)
+
+	bTerm.MouseButton1Click:Connect(function()
+		TermFrame.Visible = true
+		BrowserFrame.Visible = false
+		TermInput:CaptureFocus()
+	end)
+
+	bBrowser.MouseButton1Click:Connect(function()
+		TermFrame.Visible = false
+		BrowserFrame.Visible = true
+		if UrlBox and UrlBox.Text == "" then
+			UrlBox.Text = "home"
+			navigateTo("home")
+		end
+		pcall(function() UrlBox:CaptureFocus() end)
+	end)
+
+	bSave.MouseButton1Click:Connect(saveNow)
+	bLoad.MouseButton1Click:Connect(loadNow)
+	bClose.MouseButton1Click:Connect(function()
+		gui.Enabled = false
+		stopAudio()
+	end)
+
+	addLine(PROMPT)
+	return gui
+end
+
+local function playStart(onDone)
+	local blur = mk("BlurEffect", { Parent = Lighting, Name = BLUR_NAME, Size = 12 })
+	local gui = mk("ScreenGui", { Parent = PlayerGui, Name = "HackStart", IgnoreGuiInset = true, ResetOnSpawn = false })
+	local bg = mk("Frame", { Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(8, 10, 14) })
+	local card = mk("Frame", {
+		Parent = bg,
+		Size = UDim2.fromOffset(420, 180),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = Color3.fromRGB(16, 22, 35),
+	})
+	round(card, 16)
+	mk("UIStroke", { Parent = card, Color = Color3.fromRGB(80, 123, 255), Thickness = 1, Transparency = 0.2 })
+	mk("TextLabel", {
+		Parent = card,
+		BackgroundTransparency = 1,
+		Text = "Booting HackOS",
+		Font = Enum.Font.GothamBold,
+		TextSize = 28,
+		TextColor3 = Color3.fromRGB(220, 235, 255),
+		Size = UDim2.new(1, 0, 0, 44),
+		Position = UDim2.new(0, 0, 0, 18),
+	})
+
+	local bar = mk("Frame", {
+		Parent = card,
+		BackgroundColor3 = Color3.fromRGB(30, 40, 62),
+		Size = UDim2.new(1, -40, 0, 12),
+		Position = UDim2.new(0, 20, 1, -42),
+	})
+	round(bar, 8)
+
+	local fill = mk("Frame", { Parent = bar, BackgroundColor3 = Color3.fromRGB(86, 140, 255), Size = UDim2.new(0, 0, 1, 0) })
+	round(fill, 8)
+
+	local t = Tween:Create(fill, TweenInfo.new(1.0, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 1, 0) })
+	t:Play()
+
+	t.Completed:Connect(function()
+		gui:Destroy()
+		Tween:Create(blur, TweenInfo.new(0.2), { Size = 0 }):Play()
+		task.delay(0.22, function()
+			if blur then blur:Destroy() end
+		end)
+		if onDone then onDone() end
+	end)
+end
+
+local function buildHint()
+	local gui = mk("ScreenGui", { Parent = PlayerGui, Name = "TabletHint", IgnoreGuiInset = true, ResetOnSpawn = false, Enabled = false })
+	local shade = mk("Frame", { Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(5, 8, 12), BackgroundTransparency = 0.3 })
+	local panel = mk("Frame", {
+		Parent = shade,
+		BackgroundColor3 = Color3.fromRGB(15, 20, 32),
+		Size = UDim2.fromOffset(430, 190),
+		Position = UDim2.fromScale(0.5, 0.62),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+	})
+	round(panel, 16)
+
+	mk("TextLabel", {
+		Parent = panel,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 28,
+		TextColor3 = Color3.fromRGB(225, 235, 255),
+		Text = "HackOS Tablet",
+		Size = UDim2.new(1, 0, 0, 36),
+		Position = UDim2.new(0, 0, 0, 16),
+	})
+
+	mk("TextLabel", {
+		Parent = panel,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(180, 200, 230),
+		TextWrapped = true,
+		Text = UIS.TouchEnabled and "Tap START to boot." or "Click START to boot.",
+		Size = UDim2.new(1, -40, 0, 42),
+		Position = UDim2.new(0, 20, 0, 60),
+	})
+
+	local startBtn = mk("TextButton", {
+		Parent = panel,
+		Text = "START",
+		Font = Enum.Font.GothamSemibold,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Color3.fromRGB(79, 131, 255),
+		Size = UDim2.fromOffset(210, 42),
+		Position = UDim2.new(0.5, -105, 1, -58),
+	})
+	round(startBtn, 12)
+
+	startBtn.MouseButton1Click:Connect(function()
+		if not isToolEquipped() then
+			gui.Enabled = false
+			dbg("Start clicked but tool not equipped.")
+			return
+		end
+		gui.Enabled = false
+		playStart(function()
+			if isToolEquipped() and MainGUI then
+				MainGUI.Enabled = true
+				started = true
+				playAudio()
+				if TermInput then TermInput:CaptureFocus() end
+				dbg("Boot complete; main UI enabled.")
+			else
+				stopAudio()
+				dbg("Boot finished but not equipped; stopping audio.")
+			end
+		end)
+	end)
+
+	return gui
+end
+
+local function allowE()
+	return isToolEquipped() and started and MainGUI and MainGUI.Enabled
+end
+
+local function bindEGuard()
+	CAS:UnbindAction(E_BIND)
+	CAS:BindActionAtPriority(E_BIND, function(_, state)
+		if state ~= Enum.UserInputState.Begin then
+			return Enum.ContextActionResult.Pass
+		end
+		return allowE() and Enum.ContextActionResult.Pass or Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.E)
+end
+
+MainGUI = buildMainUI()
+HintGUI = buildHint()
+bindEGuard()
+dbg("UI built. Waiting for tool: " .. TOOL_NAME)
+
+task.spawn(function()
+	while MainGUI and MainGUI.Parent do
+		if ClockLabel then
+			ClockLabel.Text = os.date("%H:%M:%S")
+		end
+		task.wait(1)
+	end
+end)
+
+local function onEquipped()
+	setEquipped(true)
+	if HintGUI and not started then
+		HintGUI.Enabled = true
+	end
+	bindEGuard()
+	dbg("Tool equipped; showing hint.")
+end
+
+local function onUnequipped()
+	setEquipped(false)
+	started = false
+	if HintGUI then HintGUI.Enabled = false end
+	if MainGUI then MainGUI.Enabled = false end
+	stopAudio()
+	teardownStart()
+	bindEGuard()
+	dbg("Tool unequipped; hiding UI.")
+end
+
+local function hookTool(t)
+	if Tool == t then return end
+	Tool = t
+	dbg("Found tool instance: " .. t:GetFullName())
+
+	t.AncestryChanged:Connect(function(_, parent)
+		if not parent and Tool == t then
+			dbg("Tool removed/destroyed.")
+			onUnequipped()
+			Tool = nil
+		end
+	end)
+
+	t.Equipped:Connect(onEquipped)
+	t.Unequipped:Connect(onUnequipped)
+
+	local char = Player.Character
+	if char and t.Parent == char then
+		onEquipped()
+	end
+end
+
+local function findTool()
+	local char = Player.Character
+	local backpack = Player:FindFirstChildOfClass("Backpack")
+
+	if char then
+		local t = char:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	if backpack then
+		local t = backpack:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	return nil
+end
+
+local function scanForToolNow()
+	local t = findTool()
+	if t then hookTool(t) end
+end
+
+local function watch(container)
+	if not container then return end
+	container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == TOOL_NAME then
+			hookTool(child)
+		end
+	end)
+	local existing = container:FindFirstChild(TOOL_NAME)
+	if existing and existing:IsA("Tool") then
+		hookTool(existing)
+	end
+end
+
+watch(Player:WaitForChild("Backpack"))
+watch(Player.Character or Player.CharacterAdded:Wait())
+scanForToolNow()
+
+Player.CharacterAdded:Connect(function(char)
+	started = false
+	stopAudio()
+	teardownStart()
+	bindEGuard()
+	watch(char)
+	task.defer(scanForToolNow)
+	dbg("CharacterAdded; re-watching for tool.")
+end)
+
+local lastEquipped = false
+RunService.Heartbeat:Connect(function()
+	if not Tool then
+		scanForToolNow()
+		return
+	end
+	local equippedNow = isToolEquipped()
+	if equippedNow ~= lastEquipped then
+		lastEquipped = equippedNow
+		if equippedNow then
+			onEquipped()
+		else
+			onUnequipped()
+		end
+	end
+end)
+
+if MainGUI then
+	MainGUI:GetPropertyChangedSignal("Enabled"):Connect(bindEGuard)
+end
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="34">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="FilteringEnabled">true</bool>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+    <Item class="Part" referent="35">
+      <Properties>
+        <string name="Name">Baseplate</string>
+        <bool name="Anchored">true</bool>
+        <Color3uint8 name="Color3uint8">6512483</Color3uint8>
+        <bool name="Locked">true</bool>
+        <Vector3 name="Position">
+          <X>0</X>
+          <Y>-10</Y>
+          <Z>0</Z>
+        </Vector3>
+        <Vector3 name="size">
+          <X>512</X>
+          <Y>20</Y>
+          <Z>512</Z>
+        </Vector3>
+      </Properties>
+    </Item>
+  </Item>
+</roblox>

@@ -37,7 +37,7 @@ local function flushSuspicion(player)
 	local uid = player.UserId
 	local delta = pendingSuspicion[uid] or 0
 	if delta > 0 then
-		SuspicionManager.Add(delta, player)
+		SuspicionManager.Add(delta)
 		pendingSuspicion[uid] = 0
 	end
 end
