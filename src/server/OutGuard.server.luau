@@ -11,14 +11,14 @@ local HUMANOID = RIG:WaitForChild("Humanoid")
 local HRP = RIG:WaitForChild("HumanoidRootPart")
 
 -- === SETTINGS ===
-local PATROL_SPEED = 10
-local CHASE_SPEED = 16
-local VISION_RANGE = 80
+local PATROL_SPEED = 8
+local CHASE_SPEED = 13
+local VISION_RANGE = 60
 local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
-local CHASE_TIMEOUT = 10 -- seconds before giving up
+local CHASE_TIMEOUT = 5 -- seconds before giving up
 
 -- Suspicion tuning (Outside)
-local SUSPICION_TICK_SEEN = 5      -- add when actively seeing player (per tick)
+local SUSPICION_TICK_SEEN = 1.5      -- add when actively seeing player (per tick)
 local SUSPICION_TICK_RATE = 0.2    -- matches chase tick wait
 
 -- === SUSPICION THROTTLE/BATCH ===
@@ -36,7 +36,7 @@ local function flushSuspicion(player)
 	local uid = player.UserId
 	local delta = pendingSuspicion[uid] or 0
 	if delta > 0 then
-		SuspicionManager.Add(delta)
+		SuspicionManager.Add(delta, player)
 		pendingSuspicion[uid] = 0
 	end
 end
@@ -92,86 +92,115 @@ local function safeAlive(h) return h and h.Health > 0 and h.Parent end
 
 local function canSeePlayer(playerHRP)
 	if not HRP or not playerHRP then return false end
-	local diff = playerHRP.Position - HRP.Position
+
+	-- Lift the "eyes" up slightly so the ray doesn't scrape the floor/small bumps
+	local eyePosition = HRP.Position + Vector3.new(0, 1.5, 0)
+	local targetPosition = playerHRP.Position + Vector3.new(0, 1.5, 0)
+
+	local diff = targetPosition - eyePosition
 	local dist = diff.Magnitude
 	if dist > VISION_RANGE then return false end
+
 	local dir = diff.Unit
 	if HRP.CFrame.LookVector:Dot(dir) < VISION_ANGLE then return false end
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Blacklist
 	params.FilterDescendantsInstances = {GUARD}
-	local ray = Workspace:Raycast(HRP.Position, dir * dist, params)
+	local ray = Workspace:Raycast(eyePosition, dir * dist, params)
+
 	if not ray then return true end
 	local hitModel = ray.Instance and ray.Instance:FindFirstAncestorOfClass("Model")
 	return hitModel and hitModel == playerHRP.Parent
 end
 
-local function moveTo(pos)
-	if HUMANOID then
-		HUMANOID:MoveTo(pos)
-		HUMANOID.MoveToFinished:Wait()
+local function findTarget()
+	local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hrp and safeAlive(hum) then
+			local dist = (hrp.Position - HRP.Position).Magnitude
+			if dist < minDist and canSeePlayer(hrp) then
+				minDist = dist
+				nearestPlayer = player
+				nearestHRP = hrp
+			end
+		end
 	end
+	return nearestPlayer, nearestHRP
 end
 
 -- === MAIN BEHAVIOR ===
 local function patrol()
 	while task.wait(0.2) do
-		-- Look for players
-		local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
-		for _, player in ipairs(Players:GetPlayers()) do
-			local char = player.Character
-			local hrp = char and char:FindFirstChild("HumanoidRootPart")
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			if hrp and safeAlive(hum) then
-				local dist = (hrp.Position - HRP.Position).Magnitude
-				if dist < minDist and canSeePlayer(hrp) then
-					minDist = dist
-					nearestPlayer = player
-					nearestHRP = hrp
+		-- 1. Check for players
+		local nearestPlayer, nearestHRP = findTarget()
+
+		-- 2. If no player is seen, do patrol movement
+		if not nearestPlayer and #Waypoints > 0 then
+			local point = Waypoints[currentPoint]
+			if point then
+				HUMANOID.WalkSpeed = PATROL_SPEED
+				playWalk()
+				HUMANOID:MoveTo(point.Position)
+
+				-- Look for players WHILE walking instead of waiting blindly
+				local startMoveTime = os.clock()
+				while (HRP.Position - point.Position).Magnitude > 4 do
+					-- Safety timeout in case the guard gets stuck on a wall
+					if os.clock() - startMoveTime > 8 then break end
+
+					-- Check vision every 0.2 seconds while walking
+					nearestPlayer, nearestHRP = findTarget()
+					if nearestPlayer then 
+						break -- Spotted someone! Break out of the walking loop!
+					end
+					task.wait(0.2)
+				end
+
+				-- Only wait at the waypoint if we didn't just spot someone
+				if not nearestPlayer then
+					stopWalk()
+					currentPoint = (currentPoint % #Waypoints) + 1
+					task.wait(1)
 				end
 			end
 		end
 
-		-- Chase logic (basic chase + give up)
+		-- 3. Chase logic (With memory)
 		if nearestPlayer and nearestHRP then
 			HUMANOID.WalkSpeed = CHASE_SPEED
 			playWalk()
 			local startTime = os.clock()
+			local lastSeenTime = os.clock() -- Gives the guard a "memory"
 
 			while os.clock() - startTime < CHASE_TIMEOUT do
 				local char = nearestPlayer.Character
 				local hum = char and char:FindFirstChildOfClass("Humanoid")
 				if not char or not safeAlive(hum) then break end
-				if not canSeePlayer(nearestHRP) then break end
 
-				-- queue suspicion (batched)
-				queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
+				-- Update memory if we can still see them
+				if canSeePlayer(nearestHRP) then
+					lastSeenTime = os.clock()
+					queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
+				end
+
+				-- If we haven't seen them for 2.5 seconds, give up the chase
+				if os.clock() - lastSeenTime > 2.5 then 
+					break 
+				end
 
 				HUMANOID:MoveTo(nearestHRP.Position)
 				task.wait(SUSPICION_TICK_RATE)
 			end
 
-			-- flush any remaining suspicion so GUI updates responsively
+			-- flush any remaining suspicion
 			flushSuspicion(nearestPlayer)
 
 			stopWalk()
 			HUMANOID.WalkSpeed = PATROL_SPEED
-		end
-
-		-- Patrol between points
-		if #Waypoints > 0 then
-			local point = Waypoints[currentPoint]
-			if point then
-				HUMANOID.WalkSpeed = PATROL_SPEED
-				playWalk()
-				moveTo(point.Position)
-				stopWalk()
-				currentPoint = (currentPoint % #Waypoints) + 1
-				task.wait(1)
-			end
-		else
-			task.wait(0.5)
 		end
 	end
 end
