@@ -1,6 +1,6 @@
---SuspicionController
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UpdateEvent = ReplicatedStorage:WaitForChild("UpdateSuspicionEvent")
 
 
 local SuspicionManager = require(ReplicatedStorage:WaitForChild("SuspicionManager"))
@@ -71,4 +71,9 @@ task.spawn(function()
 			SuspicionManager.Reduce(1) 
 		end
 	end
+end)
+
+UpdateEvent.OnClientEvent:Connect(function(amount)
+	-- This adds the suspicion to your local UI copy of the manager
+	SuspicionManager.Add(amount)
 end)
