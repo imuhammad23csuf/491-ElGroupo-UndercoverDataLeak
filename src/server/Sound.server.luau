@@ -3,7 +3,7 @@ local soundtrack = Instance.new("Sound")
 
 soundtrack.Name = "BackgroundMusic"
 soundtrack.SoundId = "rbxassetid://71678085536375"
-soundtrack.Volume = 0.45
+soundtrack.Volume = 0.35
 soundtrack.Looped = true
 soundtrack.Parent = game.Workspace
 

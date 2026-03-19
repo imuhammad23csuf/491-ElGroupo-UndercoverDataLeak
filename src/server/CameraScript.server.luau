@@ -5,62 +5,79 @@ local Workspace = game:GetService("Workspace")
 local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
 local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
 
-local cameraRoot = Workspace:WaitForChild("Camera")
+local UPDATE_RATE = 0.1
+local PUSH_INTERVAL = 0.5
+local SUSPICION_TICK_RATE = 0.25
+local SUSPICION_PER_TICK = 2
 
 local DEFAULT_SWEEP_ANGLE = 60
-local DEFAULT_SWEEP_SPEED = 45
+local DEFAULT_SWEEP_SPEED = 35
 local DEFAULT_TRACK_SPEED = 140
-local DEFAULT_VISION_RANGE = 85
-local DEFAULT_VISION_ANGLE = 50
-local UPDATE_RATE = 0.1
+local DEFAULT_VISION_RANGE = 80
+local DEFAULT_VISION_ANGLE = 55
 
-local SUSPICION_TICK_SEEN = 1
-local SUSPICION_TICK_RATE = 0.25
-local SUSPICION_PUSH_INTERVAL = 0.5
+local QUESTION_THRESHOLD = 50
+local EXCLAMATION_THRESHOLD = 100
 
 local pendingSuspicion = {}
+local localSuspicionCache = {}
 
-local function queueSuspicion(player, amount)
-	if not player or not player.UserId then
+local function addPendingSuspicion(player, amount)
+	if not player then
 		return
 	end
 
-	local uid = player.UserId
-	pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+	local userId = player.UserId
+	pendingSuspicion[userId] = (pendingSuspicion[userId] or 0) + amount
+	local localValue = localSuspicionCache[userId] or 0
+	localSuspicionCache[userId] = localValue + amount
 end
 
 task.spawn(function()
-	while task.wait(SUSPICION_PUSH_INTERVAL) do
-		for uid, delta in pairs(pendingSuspicion) do
-			if delta and delta > 0 then
-				local player = Players:GetPlayerByUserId(uid)
+	while task.wait(PUSH_INTERVAL) do
+		for userId, amount in pairs(pendingSuspicion) do
+			if amount and amount > 0 then
+				local player = Players:GetPlayerByUserId(userId)
 				if player then
-					SuspicionManager.Add(delta, player)
+					pcall(function()
+						SuspicionManager.Add(amount, player)
+					end)
 				end
-				pendingSuspicion[uid] = 0
 			end
+			pendingSuspicion[userId] = 0
 		end
 	end
 end)
 
-local sightParams = RaycastParams.new()
-sightParams.FilterType = Enum.RaycastFilterType.Exclude
-sightParams.FilterDescendantsInstances = {cameraRoot}
-
-local function safeAlive(humanoid)
-	return humanoid and humanoid.Health > 0 and humanoid.Parent
-end
-
-local function getCharacterState(player)
-	local character = player and player.Character
-	local humanoid = character and character:FindFirstChild("Humanoid")
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-
-	if rootPart and safeAlive(humanoid) then
-		return character, rootPart, humanoid
+local function getSuspicion(player)
+	if not player then
+		return 0
 	end
 
-	return character, nil, humanoid
+	local attr = player:GetAttribute("Suspicion")
+	if typeof(attr) == "number" then
+		return attr
+	end
+
+	if SuspicionManager.Get then
+		local ok, result = pcall(function()
+			return SuspicionManager.Get(player)
+		end)
+		if ok and typeof(result) == "number" then
+			return result
+		end
+	end
+
+	if SuspicionManager.GetSuspicion then
+		local ok, result = pcall(function()
+			return SuspicionManager.GetSuspicion(player)
+		end)
+		if ok and typeof(result) == "number" then
+			return result
+		end
+	end
+
+	return localSuspicionCache[player.UserId] or 0
 end
 
 local function getNumberAttribute(instance, name, fallback)
@@ -71,117 +88,122 @@ local function getNumberAttribute(instance, name, fallback)
 	return fallback
 end
 
+local function safeAlive(humanoid)
+	return humanoid and humanoid.Health > 0 and humanoid.Parent
+end
+
+local function getCharacterRoot(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+
+	if root and safeAlive(humanoid) then
+		return character, root, humanoid
+	end
+
+	return character, nil, humanoid
+end
+
 local function normalizeAngle(angle)
 	while angle > math.pi do
 		angle -= math.pi * 2
 	end
-
 	while angle < -math.pi do
 		angle += math.pi * 2
 	end
-
 	return angle
 end
 
-local function sign(value)
-	if value > 0 then
-		return 1
-	elseif value < 0 then
-		return -1
-	end
-
-	return 0
-end
-
-local function moveAngleToward(current, target, maxStep)
+local function moveTowardAngle(current, target, maxStep)
 	local delta = normalizeAngle(target - current)
+
 	if math.abs(delta) <= maxStep then
 		return target
 	end
 
-	return current + sign(delta) * maxStep
+	if delta > 0 then
+		return current + maxStep
+	else
+		return current - maxStep
+	end
 end
 
-local function hasDirectBasePart(model)
-	for _, child in ipairs(model:GetChildren()) do
-		if child:IsA("BasePart") then
-			return true
+local function getYawToTarget(baseCFrame, worldPosition)
+	local localPos = baseCFrame:PointToObjectSpace(worldPosition)
+	return math.atan2(-localPos.X, -localPos.Z)
+end
+
+local function getAllCameraModels()
+	local results = {}
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj:IsA("Model") and obj.Name == "Camera" then
+			table.insert(results, obj)
 		end
 	end
 
-	return false
+	return results
 end
 
-local function collectCameraInstances(instance, results)
-	if instance:IsA("BasePart") then
-		table.insert(results, instance)
+local function createIndicator(part)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "AlertIndicator"
+	billboard.Size = UDim2.new(0, 60, 0, 60)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = false
+	billboard.Parent = part
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Icon"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBlack
+	label.TextStrokeTransparency = 0.2
+	label.Text = ""
+	label.Parent = billboard
+
+	return billboard, label
+end
+
+local function updateIndicator(state, player)
+	if not player then
+		state.billboard.Enabled = false
+		state.label.Text = ""
 		return
 	end
 
-	if instance:IsA("Model") then
-		if instance.PrimaryPart or hasDirectBasePart(instance) then
-			table.insert(results, instance)
-			return
-		end
-	end
+	local suspicion = getSuspicion(player)
 
-	for _, child in ipairs(instance:GetChildren()) do
-		collectCameraInstances(child, results)
-	end
-end
-
-local function resolvePivotPart(instance)
-	if instance:IsA("BasePart") then
-		return instance
-	end
-
-	if not instance:IsA("Model") then
-		return nil
-	end
-
-	if instance.PrimaryPart then
-		return instance.PrimaryPart
-	end
-
-	for _, preferredName in ipairs({"Pivot", "Head", "Lens", "Camera", "Base"}) do
-		local part = instance:FindFirstChild(preferredName, true)
-		if part and part:IsA("BasePart") then
-			instance.PrimaryPart = part
-			return part
-		end
-	end
-
-	local firstPart = instance:FindFirstChildWhichIsA("BasePart", true)
-	if firstPart then
-		instance.PrimaryPart = firstPart
-	end
-
-	return firstPart
-end
-
-local function setPartCFrame(instance, pivotPart, pivotOffset, targetPartCFrame)
-	if instance:IsA("BasePart") then
-		instance.CFrame = targetPartCFrame
-		return
-	end
-
-	if instance:IsA("Model") and pivotPart then
-		instance:PivotTo(targetPartCFrame * pivotOffset)
+	if suspicion >= EXCLAMATION_THRESHOLD then
+		state.billboard.Enabled = true
+		state.label.Text = "!"
+		state.label.TextColor3 = Color3.fromRGB(255, 70, 70)
+	elseif suspicion >= QUESTION_THRESHOLD then
+		state.billboard.Enabled = true
+		state.label.Text = "?"
+		state.label.TextColor3 = Color3.fromRGB(255, 230, 80)
+	else
+		state.billboard.Enabled = false
+		state.label.Text = ""
 	end
 end
 
-local function getYawToPosition(basePartCFrame, targetPosition)
-	local localPosition = basePartCFrame:PointToObjectSpace(targetPosition)
-	return math.atan2(-localPosition.X, -localPosition.Z)
-end
+local ignoredInstances = getAllCameraModels()
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.FilterDescendantsInstances = ignoredInstances
 
 local function hasLineOfSight(origin, targetPosition, targetCharacter)
-	local ray = Workspace:Raycast(origin, targetPosition - origin, sightParams)
-	if not ray then
+	local result = Workspace:Raycast(origin, targetPosition - origin, rayParams)
+
+	if not result then
 		return true
 	end
 
-	return ray.Instance and targetCharacter and ray.Instance:IsDescendantOf(targetCharacter)
+	return targetCharacter and result.Instance and result.Instance:IsDescendantOf(targetCharacter)
 end
 
 local function canSeePlayer(state, playerRoot)
@@ -189,19 +211,18 @@ local function canSeePlayer(state, playerRoot)
 		return false
 	end
 
-	local cameraCFrame = state.pivotPart.CFrame
-	local offset = playerRoot.Position - cameraCFrame.Position
+	local offset = playerRoot.Position - state.lookPart.Position
 	local distance = offset.Magnitude
-	if distance > state.visionRange or distance <= 0 then
+	if distance <= 0 or distance > state.visionRange then
 		return false
 	end
 
 	local direction = offset.Unit
-	if cameraCFrame.LookVector:Dot(direction) < state.visionDot then
+	if state.lookPart.CFrame.LookVector:Dot(direction) < state.visionDot then
 		return false
 	end
 
-	return hasLineOfSight(cameraCFrame.Position, playerRoot.Position, playerRoot.Parent)
+	return hasLineOfSight(state.lookPart.Position, playerRoot.Position, playerRoot.Parent)
 end
 
 local function canTrackPlayer(state, playerRoot)
@@ -209,93 +230,111 @@ local function canTrackPlayer(state, playerRoot)
 		return false
 	end
 
-	local offset = playerRoot.Position - state.pivotPart.Position
-	if offset.Magnitude > state.visionRange then
+	local distance = (playerRoot.Position - state.lookPart.Position).Magnitude
+	if distance > state.visionRange then
 		return false
 	end
 
-	local targetYaw = getYawToPosition(state.basePartCFrame, playerRoot.Position)
-	if math.abs(targetYaw) > state.sweepAngle then
+	local yaw = getYawToTarget(state.rotationBaseCFrame, playerRoot.Position)
+	if math.abs(yaw) > state.sweepAngle then
 		return false
 	end
 
-	return hasLineOfSight(state.pivotPart.Position, playerRoot.Position, playerRoot.Parent)
+	return hasLineOfSight(state.lookPart.Position, playerRoot.Position, playerRoot.Parent)
 end
 
 local function findNearestVisiblePlayer(state)
-	local nearestPlayer, nearestRoot
-	local shortestDistance = state.visionRange + 1
+	local bestPlayer = nil
+	local bestRoot = nil
+	local bestDistance = state.visionRange + 1
 
 	for _, player in ipairs(Players:GetPlayers()) do
-		local _, playerRoot = getCharacterState(player)
-		if playerRoot and canSeePlayer(state, playerRoot) then
-			local distance = (playerRoot.Position - state.pivotPart.Position).Magnitude
-			if distance < shortestDistance then
-				shortestDistance = distance
-				nearestPlayer = player
-				nearestRoot = playerRoot
+		local _, root = getCharacterRoot(player)
+		if root and canSeePlayer(state, root) then
+			local distance = (root.Position - state.lookPart.Position).Magnitude
+			if distance < bestDistance then
+				bestDistance = distance
+				bestPlayer = player
+				bestRoot = root
 			end
 		end
 	end
 
-	return nearestPlayer, nearestRoot
+	return bestPlayer, bestRoot
 end
 
-local function buildCameraState(instance)
-	local pivotPart = resolvePivotPart(instance)
-	if not pivotPart then
-		warn(("[CameraScript] No rotatable BasePart found for %s"):format(instance:GetFullName()))
+local function collectMovingParts(model)
+	local base = model:FindFirstChild("Base", true)
+	if not base or not base:IsA("BasePart") then
+		warn("[CCTV] Missing Base part in", model:GetFullName())
 		return nil
 	end
 
-	local pivotOffset = CFrame.new()
-	if instance:IsA("Model") then
-		pivotOffset = pivotPart.CFrame:ToObjectSpace(instance:GetPivot())
+	local lens = model:FindFirstChild("Lens", true)
+	if not lens or not lens:IsA("BasePart") then
+		warn("[CCTV] Missing Lens part in", model:GetFullName())
+		return nil
 	end
 
-	return {
-		instance = instance,
-		pivotPart = pivotPart,
-		pivotOffset = pivotOffset,
-		basePartCFrame = pivotPart.CFrame,
-		currentYaw = 0,
-		sweepDirection = 1,
-		targetPlayer = nil,
-		nextSuspicionAt = 0,
-		sweepAngle = math.rad(getNumberAttribute(instance, "SweepAngle", DEFAULT_SWEEP_ANGLE)),
-		sweepSpeed = math.rad(getNumberAttribute(instance, "SweepSpeed", DEFAULT_SWEEP_SPEED)),
-		trackSpeed = math.rad(getNumberAttribute(instance, "TrackSpeed", DEFAULT_TRACK_SPEED)),
-		visionRange = getNumberAttribute(instance, "VisionRange", DEFAULT_VISION_RANGE),
-		visionDot = math.cos(math.rad(getNumberAttribute(instance, "VisionAngle", DEFAULT_VISION_ANGLE))),
-	}
+	local movingParts = { base, lens }
+	return base, lens, movingParts
+end
+
+local function buildRelativeOffsets(basePart, parts)
+	local offsets = {}
+
+	for _, part in ipairs(parts) do
+		offsets[part] = basePart.CFrame:ToObjectSpace(part.CFrame)
+	end
+
+	return offsets
 end
 
 local function applyYaw(state)
-	local targetPartCFrame = state.basePartCFrame * CFrame.Angles(0, state.currentYaw, 0)
-	setPartCFrame(state.instance, state.pivotPart, state.pivotOffset, targetPartCFrame)
+	local rotatedBase = state.rotationBaseCFrame * CFrame.Angles(0, state.currentYaw, 0)
+
+	for _, part in ipairs(state.movingParts) do
+		if part and part.Parent then
+			part.CFrame = rotatedBase * state.relativeOffsets[part]
+		end
+	end
 end
 
-local function updateTrackedTarget(state, now, deltaTime)
-	local _, targetRoot, targetHumanoid = getCharacterState(state.targetPlayer)
-	if not targetRoot or not safeAlive(targetHumanoid) or not canTrackPlayer(state, targetRoot) then
-		state.targetPlayer = nil
-		return false
+local function buildCameraState(model)
+	local basePart, lens, movingParts = collectMovingParts(model)
+	if not basePart or not lens or not movingParts then
+		return nil
 	end
 
-	local targetYaw = math.clamp(getYawToPosition(state.basePartCFrame, targetRoot.Position), -state.sweepAngle, state.sweepAngle)
-	state.currentYaw = moveAngleToward(state.currentYaw, targetYaw, state.trackSpeed * deltaTime)
-	applyYaw(state)
+	local rotationBaseCFrame = basePart.CFrame
+	local relativeOffsets = buildRelativeOffsets(basePart, movingParts)
+	local billboard, label = createIndicator(lens)
 
-	if canSeePlayer(state, targetRoot) and now >= state.nextSuspicionAt then
-		queueSuspicion(state.targetPlayer, SUSPICION_TICK_SEEN)
-		state.nextSuspicionAt = now + SUSPICION_TICK_RATE
-	end
+	return {
+		model = model,
+		basePart = basePart,
+		lookPart = lens,
+		movingParts = movingParts,
+		relativeOffsets = relativeOffsets,
+		rotationBaseCFrame = rotationBaseCFrame,
+		currentYaw = 0,
+		sweepDirection = 1,
+		targetPlayer = nil,
+		nextSuspicionTick = 0,
 
-	return true
+		sweepAngle = math.rad(getNumberAttribute(model, "SweepAngle", DEFAULT_SWEEP_ANGLE)),
+		sweepSpeed = math.rad(getNumberAttribute(model, "SweepSpeed", DEFAULT_SWEEP_SPEED)),
+		trackSpeed = math.rad(getNumberAttribute(model, "TrackSpeed", DEFAULT_TRACK_SPEED)),
+		visionRange = getNumberAttribute(model, "VisionRange", DEFAULT_VISION_RANGE),
+		visionDot = math.cos(math.rad(getNumberAttribute(model, "VisionAngle", DEFAULT_VISION_ANGLE))),
+
+		billboard = billboard,
+		label = label,
+	}
 end
 
-local function updateSweep(state, deltaTime)
-	state.currentYaw += state.sweepDirection * state.sweepSpeed * deltaTime
+local function updateSweep(state, dt)
+	state.currentYaw += state.sweepDirection * state.sweepSpeed * dt
 
 	if state.currentYaw >= state.sweepAngle then
 		state.currentYaw = state.sweepAngle
@@ -306,49 +345,82 @@ local function updateSweep(state, deltaTime)
 	end
 
 	applyYaw(state)
+	updateIndicator(state, nil)
 end
 
-local cameras = {}
-collectCameraInstances(cameraRoot, cameras)
+local function updateTracking(state, now, dt)
+	local _, root, humanoid = getCharacterRoot(state.targetPlayer)
+
+	if not root or not safeAlive(humanoid) or not canTrackPlayer(state, root) then
+		state.targetPlayer = nil
+		updateIndicator(state, nil)
+		return false
+	end
+
+	local targetYaw = math.clamp(
+		getYawToTarget(state.rotationBaseCFrame, root.Position),
+		-state.sweepAngle,
+		state.sweepAngle
+	)
+
+	state.currentYaw = moveTowardAngle(state.currentYaw, targetYaw, state.trackSpeed * dt)
+	applyYaw(state)
+
+	if canSeePlayer(state, root) and now >= state.nextSuspicionTick then
+		addPendingSuspicion(state.targetPlayer, SUSPICION_PER_TICK)
+		state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+	end
+
+	updateIndicator(state, state.targetPlayer)
+	return true
+end
 
 local cameraStates = {}
-for _, cameraInstance in ipairs(cameras) do
-	local state = buildCameraState(cameraInstance)
+
+for _, model in ipairs(getAllCameraModels()) do
+	local state = buildCameraState(model)
 	if state then
 		table.insert(cameraStates, state)
 	end
 end
 
 if #cameraStates == 0 then
-	warn("[CameraScript] No camera parts or models were found under Workspace.Camera")
+	warn("[CCTV] No valid camera models were found in Workspace.")
 	return
 end
 
-local lastUpdate = os.clock()
+local lastTime = os.clock()
 
 while true do
 	task.wait(UPDATE_RATE)
 
 	local now = os.clock()
-	local deltaTime = math.max(now - lastUpdate, 0)
-	lastUpdate = now
+	local dt = math.max(now - lastTime, 0)
+	lastTime = now
 
 	for _, state in ipairs(cameraStates) do
-		if not updateTrackedTarget(state, now, deltaTime) then
-			updateSweep(state, deltaTime)
+		if not updateTracking(state, now, dt) then
+			updateSweep(state, dt)
 
-			local player, playerRoot = findNearestVisiblePlayer(state)
-			if player and playerRoot then
+			local player, root = findNearestVisiblePlayer(state)
+			if player and root then
 				state.targetPlayer = player
 
-				local targetYaw = math.clamp(getYawToPosition(state.basePartCFrame, playerRoot.Position), -state.sweepAngle, state.sweepAngle)
-				state.currentYaw = moveAngleToward(state.currentYaw, targetYaw, state.trackSpeed * deltaTime)
+				local targetYaw = math.clamp(
+					getYawToTarget(state.rotationBaseCFrame, root.Position),
+					-state.sweepAngle,
+					state.sweepAngle
+				)
+
+				state.currentYaw = moveTowardAngle(state.currentYaw, targetYaw, state.trackSpeed * dt)
 				applyYaw(state)
 
-				if now >= state.nextSuspicionAt and canSeePlayer(state, playerRoot) then
-					queueSuspicion(player, SUSPICION_TICK_SEEN)
-					state.nextSuspicionAt = now + SUSPICION_TICK_RATE
+				if now >= state.nextSuspicionTick and canSeePlayer(state, root) then
+					addPendingSuspicion(player, SUSPICION_PER_TICK)
+					state.nextSuspicionTick = now + SUSPICION_TICK_RATE
 				end
+
+				updateIndicator(state, player)
 			end
 		end
 	end
