@@ -6,8 +6,17 @@
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"
+      }, 
+
+      "TestEZ": {
+        "$path": "src/TestEZ"
+      },
+
+      "Tests": {
+        "$path": "src/Tests"
       }
     },
+    
 
     "ServerScriptService": {
       "Server": {
