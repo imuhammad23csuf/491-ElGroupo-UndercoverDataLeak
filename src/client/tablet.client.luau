@@ -11,6 +11,8 @@ local Lighting = game:GetService("Lighting")
 local SoundService = game:GetService("SoundService")
 local ContentProvider = game:GetService("ContentProvider")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ObjectiveManager = require(ReplicatedStorage:WaitForChild("ObjectiveManager"))
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -28,7 +30,7 @@ local SAVE_KEYS = { "Obj_Admin", "TimesLeaked" }
 local isEquipped = false
 local started = false
 local MainGUI, HintGUI
-local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel
+local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel, MissionsFrame, MissionsList
 
 local DEBUG = true
 
@@ -478,11 +480,12 @@ local function buildMainUI()
 		return b
 	end
 
-	local bTerm = button("Terminal", 200)
-	local bBrowser = button("Browser", 300)
-	local bSave = button("Save", 400, 72)
-	local bLoad = button("Load", 478, 72)
-	local bClose = button("Close", 556, 72)
+	local bTerm = button("Terminal", 180, 80)
+	local bBrowser = button("Browser", 265, 80)
+	local bMissions = button("Missions", 350, 80)
+	local bSave = button("Save", 435, 72)
+	local bLoad = button("Load", 512, 72)
+	local bClose = button("Close", 589, 72)
 
 	local pad = mk("Frame", {
 		Parent = desktop,
@@ -508,6 +511,21 @@ local function buildMainUI()
 	})
 	round(TermFrame, 12)
 	round(BrowserFrame, 12)
+	
+	MissionsFrame = mk("Frame", {
+		Parent = pad,
+		BackgroundColor3 = Color3.fromRGB(15, 19, 28),
+		Size = UDim2.new(1, -12, 1, -12),
+		Position = UDim2.new(0, 6, 0, 6),
+		Visible = false,
+	})
+	round(MissionsFrame, 12)
+
+	mk("TextLabel", { Parent = MissionsFrame, BackgroundTransparency = 1, Text = " ACTIVE MISSIONS", Font = Enum.Font.GothamBlack, TextSize = 18, TextColor3 = Color3.fromRGB(220, 236, 255), Position = UDim2.new(0, 10, 0, 10), Size = UDim2.new(1, -20, 0, 30), TextXAlignment = Enum.TextXAlignment.Left })
+
+	MissionsList = mk("ScrollingFrame", { Parent = MissionsFrame, BackgroundColor3 = Color3.fromRGB(8, 10, 13), BorderSizePixel = 0, ScrollBarThickness = 6, Size = UDim2.new(1, -20, 1, -50), Position = UDim2.new(0, 10, 0, 40) })
+	round(MissionsList, 10)
+	mk("UIListLayout", { Parent = MissionsList, Name = "UIListLayout", Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder })
 
 	TermOut = mk("ScrollingFrame", {
 		Parent = TermFrame,
@@ -653,17 +671,24 @@ local function buildMainUI()
 	bTerm.MouseButton1Click:Connect(function()
 		TermFrame.Visible = true
 		BrowserFrame.Visible = false
+		MissionsFram.Visible = false
 		TermInput:CaptureFocus()
 	end)
 
 	bBrowser.MouseButton1Click:Connect(function()
 		TermFrame.Visible = false
 		BrowserFrame.Visible = true
+		MissiosFram.Visiible = false
 		if UrlBox and UrlBox.Text == "" then
 			UrlBox.Text = "home"
 			navigateTo("home")
 		end
 		pcall(function() UrlBox:CaptureFocus() end)
+	end)
+	bMissions.MouseButton1Click:Connect(function()
+		TermFrame.Visible = false
+		BrowserFrame.Visible = false
+		MissionsFrame.Visible = true
 	end)
 
 	bSave.MouseButton1Click:Connect(saveNow)
@@ -810,6 +835,26 @@ local function bindEGuard()
 	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.E)
 end
 
+ObjectiveManager.Changed:Connect(function(objectivesList)
+	if not MissionsList then return end
+	-- Clear old tasks
+	for _, child in ipairs(MissionsList:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	-- Build new tasks
+	for _, taskInfo in ipairs(objectivesList) do
+		local taskRow = mk("Frame", { Parent = MissionsList, BackgroundColor3 = Color3.fromRGB(20, 26, 38), Size = UDim2.new(1, -10, 0, 50) })
+		round(taskRow, 8)
+		mk("TextLabel", { Parent = taskRow, BackgroundTransparency = 1, Text = taskInfo.text, Font = Enum.Font.GothamSemibold, TextSize = 14, TextColor3 = Color3.new(1, 1, 1), Position = UDim2.new(0, 10, 0, 5), Size = UDim2.new(1, -20, 0, 20), TextXAlignment = Enum.TextXAlignment.Left })
+
+		local statusColor = Color3.fromRGB(150, 150, 150)
+		if taskInfo.status == "Completed" then statusColor = Color3.fromRGB(0, 255, 100)
+		elseif taskInfo.status == "In Progress" then statusColor = Color3.fromRGB(255, 200, 0) end
+
+		mk("TextLabel", { Parent = taskRow, BackgroundTransparency = 1, Text = string.upper(taskInfo.status), Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = statusColor, Position = UDim2.new(0, 10, 0, 25), Size = UDim2.new(1, -20, 0, 20), TextXAlignment = Enum.TextXAlignment.Left })
+	end
+end)
+
 MainGUI = buildMainUI()
 HintGUI = buildHint()
 bindEGuard()
@@ -933,3 +978,4 @@ end)
 if MainGUI then
 	MainGUI:GetPropertyChangedSignal("Enabled"):Connect(bindEGuard)
 end
+
