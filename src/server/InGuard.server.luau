@@ -3,7 +3,8 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local SuspicionManager = require(ReplicatedStorage:WaitForChild("SuspicionManager"))
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
 
 local GUARD = Workspace:WaitForChild("GuardInside")
 local RIG = GUARD:WaitForChild("Rig")
@@ -15,12 +16,11 @@ local PATROL_SPEED = 8
 local CHASE_SPEED = 14
 local VISION_RANGE = 35  -- Shorter range for indoors
 local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
-local CHASE_TIMEOUT = 5 
+local CHASE_TIMEOUT = 3
 
 -- Suspicion tuning (Inside)
-local SUSPICION_TICK_SEEN = 2.5    -- Faster suspicion buildup indoors
-local SUSPICION_TICK_SEARCH = 1    -- add during search scanning (per scan tick)
-local SUSPICION_TICK_RATE = 0.2    -- matches chase tick wait
+local SUSPICION_PER_TICK = 2     -- matches camera suspicion rate
+local SUSPICION_TICK_RATE = 0.25 -- matches camera suspicion cadence
 
 -- === SUSPICION THROTTLE/BATCH ===
 local SUSPICION_PUSH_INTERVAL = 0.5 
@@ -142,17 +142,16 @@ local function patrol()
 		if nearestPlayer and nearestHRP then
 			HUMANOID.WalkSpeed = CHASE_SPEED
 			playWalk()
-			local startTime = os.clock()
+			local chaseStartTime = os.clock()
 			local lastSeenPos = nearestHRP.Position
 
-			while os.clock() - startTime < CHASE_TIMEOUT do
+			while os.clock() - chaseStartTime < CHASE_TIMEOUT do
 				local char = nearestPlayer.Character
 				local hum = char and char:FindFirstChildOfClass("Humanoid")
 				if not char or not safeAlive(hum) then break end
 
 				if canSeePlayer(nearestHRP) then
-					-- queue suspicion when seen
-					queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
+					queueSuspicion(nearestPlayer, SUSPICION_PER_TICK)
 					lastSeenPos = nearestHRP.Position
 					HUMANOID:MoveTo(nearestHRP.Position)
 				else
@@ -161,10 +160,7 @@ local function patrol()
 					task.wait(0.4)
 
 					local searchStart = os.clock()
-					while os.clock() - searchStart < 2.5 do
-						-- queue suspicion during active searching/scanning
-						queueSuspicion(nearestPlayer, SUSPICION_TICK_SEARCH)
-
+					while os.clock() - searchStart < 2.5 and os.clock() - chaseStartTime < CHASE_TIMEOUT do
 						-- rotate/scan
 						if HRP then
 							HRP.CFrame = HRP.CFrame * CFrame.Angles(0, math.rad(35), 0)

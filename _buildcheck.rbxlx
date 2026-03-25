@@ -1,0 +1,5666 @@
+<roblox version="4">
+  <Item class="Lighting" referent="0">
+    <Properties>
+      <string name="Name">Lighting</string>
+      <Color3 name="Ambient">
+        <R>0</R>
+        <G>0</G>
+        <B>0</B>
+      </Color3>
+      <float name="Brightness">2</float>
+      <bool name="GlobalShadows">true</bool>
+      <bool name="Outlines">false</bool>
+      <token name="Technology">1</token>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="1">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="2">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">DialogueData</string>
+          <string name="Source">local DialogueData = {
+	Intro = {
+		start = "node1",
+
+		nodes = {
+			node1 = {
+				text = "You find a suspicious USB drive on a teacher's desk. What do you do?",
+				choices = {
+					{
+						text = "Turn it in immediately.",
+						next = "node2",
+						integrity = 10,
+					},
+					{
+						text = "Plug it into a school computer.",
+						next = "node3",
+						integrity = -15,
+					},
+				},
+			},
+
+			node2 = {
+				text = "You reported the device. The administrator thanks you for doing the right thing.",
+				choices = {
+					{
+						text = "Continue",
+						next = "node4",
+						integrity = 0,
+					},
+				},
+			},
+
+			node3 = {
+				text = "The computer begins acting strangely. That was a risky choice.",
+				choices = {
+					{
+						text = "Continue",
+						next = "node4",
+						integrity = 0,
+					},
+				},
+			},
+
+			node4 = {
+				text = "Later, a friend asks if you want to hide what happened.",
+				choices = {
+					{
+						text = "Tell the truth.",
+						next = "goodEnding",
+						integrity = 10,
+					},
+					{
+						text = "Hide the evidence.",
+						next = "badEnding",
+						integrity = -20,
+					},
+				},
+			},
+
+			goodEnding = {
+				text = "Your honesty helps protect the school network.",
+				choices = {},
+				isEnd = true,
+			},
+
+			badEnding = {
+				text = "The cover-up makes the situation worse.",
+				choices = {},
+				isEnd = true,
+			},
+		},
+	},
+}
+
+return DialogueData</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">Hello</string>
+          <string name="Source"><![CDATA[return function()
+	print("Hello, world!")
+end
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">IntegrityService</string>
+          <string name="Source">local IntegrityService = {}
+
+local integrityScores = {}
+
+function IntegrityService.getIntegrity(player)
+	if not player or not player.UserId then
+		return 0
+	end
+
+	return integrityScores[player.UserId] or 0
+end
+
+function IntegrityService.setIntegrity(player, value)
+	if not player or not player.UserId then
+		return 0
+	end
+
+	integrityScores[player.UserId] = value
+	return value
+end
+
+function IntegrityService.addIntegrity(player, amount)
+	if not player or not player.UserId then
+		return 0
+	end
+
+	local current = IntegrityService.getIntegrity(player)
+	local updated = current + amount
+	integrityScores[player.UserId] = updated
+
+	return updated
+end
+
+function IntegrityService.resetIntegrity(player)
+	if not player or not player.UserId then
+		return
+	end
+
+	integrityScores[player.UserId] = 0
+end
+
+return IntegrityService</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
+          <string name="Name">NarrativeManager</string>
+          <string name="Source">local DialogueData = require(script.Parent.DialogueData)
+local SuspicionManager = require(script.Parent.SuspicionManager)
+
+local NarrativeManager = {}
+
+local activeSessions = {}
+
+local function getDialogue(dialogueId)
+	return DialogueData[dialogueId]
+end
+
+local function getSession(player)
+	if not player or not player.UserId then
+		return nil
+	end
+
+	return activeSessions[player.UserId]
+end
+
+local function setSession(player, sessionData)
+	if not player or not player.UserId then
+		return
+	end
+
+	activeSessions[player.UserId] = sessionData
+end
+
+local function clearSession(player)
+	if not player or not player.UserId then
+		return
+	end
+
+	activeSessions[player.UserId] = nil
+end
+
+function NarrativeManager.startDialogue(player, dialogueId)
+	local dialogue = getDialogue(dialogueId)
+	if not dialogue then
+		return nil, "Dialogue not found"
+	end
+
+	local startNodeId = dialogue.start
+	local startNode = dialogue.nodes[startNodeId]
+
+	if not startNode then
+		return nil, "Start node not found"
+	end
+
+	setSession(player, {
+		dialogueId = dialogueId,
+		currentNodeId = startNodeId,
+	})
+
+	return {
+		dialogueId = dialogueId,
+		nodeId = startNodeId,
+		text = startNode.text,
+		choices = startNode.choices,
+		isEnd = startNode.isEnd or false,
+		integrity = IntegrityService.getIntegrity(player),
+	}
+end
+
+function NarrativeManager.getCurrentNode(player)
+	local session = getSession(player)
+	if not session then
+		return nil, "No active dialogue"
+	end
+
+	local dialogue = getDialogue(session.dialogueId)
+	if not dialogue then
+		return nil, "Dialogue data missing"
+	end
+
+	local node = dialogue.nodes[session.currentNodeId]
+	if not node then
+		return nil, "Current node missing"
+	end
+
+	return {
+		dialogueId = session.dialogueId,
+		nodeId = session.currentNodeId,
+		text = node.text,
+		choices = node.choices,
+		isEnd = node.isEnd or false,
+		integrity = IntegrityService.getIntegrity(player),
+	}
+end
+
+function NarrativeManager.chooseOption(player, choiceIndex)
+	local session = getSession(player)
+	if not session then
+		return nil, "No active dialogue"
+	end
+
+	local dialogue = getDialogue(session.dialogueId)
+	if not dialogue then
+		return nil, "Dialogue data missing"
+	end
+
+	local currentNode = dialogue.nodes[session.currentNodeId]
+	if not currentNode then
+		return nil, "Current node missing"
+	end
+
+	local choices = currentNode.choices or {}
+	local choice = choices[choiceIndex]
+
+	if not choice then
+		return nil, "Invalid choice"
+	end
+
+	if choice.integrity then
+		SuspicionManager.addSuspicion(player, -choice.integrity)
+	end
+
+	if not choice.next then
+		clearSession(player)
+		return {
+			dialogueId = session.dialogueId,
+			nodeId = nil,
+			text = nil,
+			choices = {},
+			isEnd = true,
+			integrity = IntegrityService.getIntegrity(player),
+		}
+	end
+
+	local nextNode = dialogue.nodes[choice.next]
+	if not nextNode then
+		clearSession(player)
+		return nil, "Next node missing"
+	end
+
+	session.currentNodeId = choice.next
+	setSession(player, session)
+
+	local response = {
+		dialogueId = session.dialogueId,
+		nodeId = choice.next,
+		text = nextNode.text,
+		choices = nextNode.choices,
+		isEnd = nextNode.isEnd or false,
+		integrity = IntegrityService.getIntegrity(player),
+	}
+
+	if nextNode.isEnd then
+		clearSession(player)
+	end
+
+	return response
+end
+
+function NarrativeManager.endDialogue(player)
+	clearSession(player)
+end
+
+function NarrativeManager.hasActiveDialogue(player)
+	return getSession(player) ~= nil
+end
+
+return NarrativeManager</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="7">
+        <Properties>
+          <string name="Name">ObjectiveManager</string>
+          <string name="Source"><![CDATA[local ObjectiveManager = {}
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+-- Auto-create the RemoteEvent if it doesn't exist
+local updateRemote = ReplicatedStorage:FindFirstChild("ObjectiveUpdate")
+if not updateRemote and RunService:IsServer() then
+	updateRemote = Instance.new("RemoteEvent")
+	updateRemote.Name = "ObjectiveUpdate"
+	updateRemote.Parent = ReplicatedStorage
+end
+
+local bindable = Instance.new("BindableEvent")
+ObjectiveManager.Changed = bindable.Event
+
+local currentObjectives = {}
+
+-- === CLIENT SIDE ===
+-- The UI listens for updates from the server
+if RunService:IsClient() then
+	updateRemote = ReplicatedStorage:WaitForChild("ObjectiveUpdate")
+	updateRemote.OnClientEvent:Connect(function(objectivesList)
+		currentObjectives = objectivesList
+		bindable:Fire(currentObjectives)
+	end)
+end
+
+-- === SERVER SIDE ===
+-- The Server uses this to send new tasks to a specific player
+function ObjectiveManager.SetPlayerObjectives(player, objectivesList)
+	if RunService:IsServer() and player then
+		updateRemote:FireClient(player, objectivesList)
+	end
+end
+
+-- The Server uses this to update tasks for everyone in the game
+function ObjectiveManager.SetGlobalObjectives(objectivesList)
+	if RunService:IsServer() then
+		updateRemote:FireAllClients(objectivesList)
+	end
+end
+
+function ObjectiveManager.Get()
+	return currentObjectives
+end
+
+return ObjectiveManager
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="8">
+        <Properties>
+          <string name="Name">ScannerLock</string>
+          <string name="Source">local prompt = script.Parent
+
+prompt.Triggered:Connect(function(player)
+	-- 1. Check if the player is physically holding the GhostKey
+	local character = player.Character
+	local holdingGhostKey = character and character:FindFirstChild("GhostKey")
+
+	if holdingGhostKey then
+		-- 2. They have the key in hand! Now check if they stole the code.
+		if player:GetAttribute("HasKeycardData") == true then
+			print("ACCESS GRANTED: Unlocking doors for " .. player.Name)
+
+			-- Unlock the door
+			player:SetAttribute("UnlockedSlidingDoor", true)
+
+			-- Change UI and turn off the scanner
+			prompt.ActionText = "ACCESS GRANTED"
+			task.wait(1)
+			prompt.Enabled = false 
+		else
+			-- They hold the key, but haven't hacked the guard yet
+			print("ACCESS DENIED: Ghost Key is empty")
+			prompt.ActionText = "KEY EMPTY"
+			task.wait(1)
+			prompt.ActionText = "OpenDoor"
+		end
+	else
+		-- 3. They pressed 'E' with empty hands
+		print("ACCESS DENIED: You must equip the Ghost Key!")
+		prompt.ActionText = "USE GHOST KEY"
+		task.wait(1)
+		prompt.ActionText = "OpenDoor"
+	end
+end)</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">SuspicionManager</string>
+          <string name="Source"><![CDATA[--Suspicion Manager
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local SuspicionManager = {}
+
+local MAX_VAL = 100
+local DEBUG_ENABLED = true
+
+local bindable = Instance.new("BindableEvent")
+SuspicionManager.Changed = bindable.Event
+
+local function debugLog(message)
+	if DEBUG_ENABLED then
+		warn(("[SuspicionManager] %s"):format(message))
+	end
+end
+
+local function clampNumber(value)
+	return math.clamp(tonumber(value) or 0, 0, MAX_VAL)
+end
+
+local function getSharedRoot()
+	local shared = ReplicatedStorage:FindFirstChild("Shared")
+	if not shared and RunService:IsClient() then
+		shared = ReplicatedStorage:WaitForChild("Shared", 10)
+	end
+	if shared then
+		return shared
+	end
+	return ReplicatedStorage
+end
+
+local updateRemote
+local actionRemote
+
+if RunService:IsServer() then
+	local root = getSharedRoot()
+
+	updateRemote = root:FindFirstChild("SuspicionUpdate")
+	if not updateRemote then
+		updateRemote = Instance.new("RemoteEvent")
+		updateRemote.Name = "SuspicionUpdate"
+		updateRemote.Parent = root
+	end
+
+	actionRemote = root:FindFirstChild("SuspicionAction")
+	if not actionRemote then
+		actionRemote = Instance.new("RemoteEvent")
+		actionRemote.Name = "SuspicionAction"
+		actionRemote.Parent = root
+	end
+else
+	local root = getSharedRoot()
+	updateRemote = root:WaitForChild("SuspicionUpdate")
+	actionRemote = root:WaitForChild("SuspicionAction")
+end
+
+local localSuspicion = 0
+local serverSuspicionByUserId = {}
+
+local function getServerSuspicion(player)
+	if not player then
+		return 0
+	end
+	return serverSuspicionByUserId[player.UserId] or 0
+end
+
+local function pushToClient(player, newValue)
+	if player and player.Parent then
+		updateRemote:FireClient(player, newValue)
+	end
+end
+
+local function setServerSuspicion(player, newValue)
+	if not player then
+		return
+	end
+
+	local clamped = clampNumber(newValue)
+	serverSuspicionByUserId[player.UserId] = clamped
+	pushToClient(player, clamped)
+	bindable:Fire(clamped, player)
+end
+
+local function applyServerDelta(player, delta)
+	if not player then
+		return
+	end
+	local currentValue = getServerSuspicion(player)
+	local newValue = clampNumber(currentValue + delta)
+	serverSuspicionByUserId[player.UserId] = newValue
+	debugLog(("%s %+d -> %d"):format(player.Name, delta, newValue))
+	pushToClient(player, newValue)
+	bindable:Fire(newValue, player)
+end
+
+function SuspicionManager.Add(amount, player)
+	local delta = math.max(0, tonumber(amount) or 0)
+	if delta <= 0 then
+		return
+	end
+
+	if RunService:IsServer() then
+		if player then
+			applyServerDelta(player, delta)
+		else
+			for _, candidate in ipairs(Players:GetPlayers()) do
+				applyServerDelta(candidate, delta)
+			end
+		end
+	else
+		actionRemote:FireServer("Add", delta)
+	end
+end
+
+function SuspicionManager.Reduce(amount, player)
+	local delta = math.max(0, tonumber(amount) or 0)
+	if delta <= 0 then
+		return
+	end
+
+	if RunService:IsServer() then
+		if player then
+			applyServerDelta(player, -delta)
+		else
+			for _, candidate in ipairs(Players:GetPlayers()) do
+				applyServerDelta(candidate, -delta)
+			end
+		end
+	else
+		actionRemote:FireServer("Reduce", delta)
+	end
+end
+
+function SuspicionManager.Get(player)
+	if RunService:IsServer() then
+		if player then
+			return getServerSuspicion(player)
+		end
+		return 0
+	end
+
+	return localSuspicion
+end
+
+if RunService:IsServer() then
+	Players.PlayerAdded:Connect(function(player)
+		setServerSuspicion(player, 0)
+		debugLog(("PlayerAdded sync -> %s = 0"):format(player.Name))
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		serverSuspicionByUserId[player.UserId] = nil
+	end)
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		setServerSuspicion(player, 0)
+	end
+
+	actionRemote.OnServerEvent:Connect(function(player, action, amount)
+		if action == "Reduce" then
+			SuspicionManager.Reduce(amount, player)
+		elseif action == "Add" then
+			SuspicionManager.Add(amount, player)
+		elseif action == "Get" then
+			pushToClient(player, getServerSuspicion(player))
+		end
+	end)
+else
+	updateRemote.OnClientEvent:Connect(function(newValue)
+		localSuspicion = clampNumber(newValue)
+		debugLog(("Client sync -> %d"):format(localSuspicion))
+		bindable:Fire(localSuspicion)
+	end)
+
+	task.defer(function()
+		actionRemote:FireServer("Get", 0)
+	end)
+end
+
+return SuspicionManager
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+    <Item class="ModuleScript" referent="10">
+      <Properties>
+        <string name="Name">TestEZ</string>
+        <string name="Source">local Expectation = require(script.Expectation)
+local TestBootstrap = require(script.TestBootstrap)
+local TestEnum = require(script.TestEnum)
+local TestPlan = require(script.TestPlan)
+local TestPlanner = require(script.TestPlanner)
+local TestResults = require(script.TestResults)
+local TestRunner = require(script.TestRunner)
+local TestSession = require(script.TestSession)
+local TextReporter = require(script.Reporters.TextReporter)
+local TextReporterQuiet = require(script.Reporters.TextReporterQuiet)
+local TeamCityReporter = require(script.Reporters.TeamCityReporter)
+
+local function run(testRoot, callback)
+	local modules = TestBootstrap:getModules(testRoot)
+	local plan = TestPlanner.createPlan(modules)
+	local results = TestRunner.runPlan(plan)
+
+	callback(results)
+end
+
+local TestEZ = {
+	run = run,
+
+	Expectation = Expectation,
+	TestBootstrap = TestBootstrap,
+	TestEnum = TestEnum,
+	TestPlan = TestPlan,
+	TestPlanner = TestPlanner,
+	TestResults = TestResults,
+	TestRunner = TestRunner,
+	TestSession = TestSession,
+
+	Reporters = {
+		TextReporter = TextReporter,
+		TextReporterQuiet = TextReporterQuiet,
+		TeamCityReporter = TeamCityReporter,
+	},
+}
+
+return TestEZ</string>
+      </Properties>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">Context</string>
+          <string name="Source"><![CDATA[--[[
+	The Context object implements a write-once key-value store. It also allows
+	for a new Context object to inherit the entries from an existing one.
+]]
+local Context = {}
+
+function Context.new(parent)
+	local meta = {}
+	local index = {}
+	meta.__index = index
+
+	if parent then
+		for key, value in pairs(getmetatable(parent).__index) do
+			index[key] = value
+		end
+	end
+
+	function meta.__newindex(_obj, key, value)
+		assert(index[key] == nil, string.format("Cannot reassign %s in context", tostring(key)))
+		index[key] = value
+	end
+
+	return setmetatable({}, meta)
+end
+
+return Context
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">Expectation</string>
+          <string name="Source"><![CDATA[--[[
+	Allows creation of expectation statements designed for behavior-driven
+	testing (BDD). See Chai (JS) or RSpec (Ruby) for examples of other BDD
+	frameworks.
+
+	The Expectation class is exposed to tests as a function called `expect`:
+
+		expect(5).to.equal(5)
+		expect(foo()).to.be.ok()
+
+	Expectations can be negated using .never:
+
+		expect(true).never.to.equal(false)
+
+	Expectations throw errors when their conditions are not met.
+]]
+
+local Expectation = {}
+
+--[[
+	These keys don't do anything except make expectations read more cleanly
+]]
+local SELF_KEYS = {
+	to = true,
+	be = true,
+	been = true,
+	have = true,
+	was = true,
+	at = true,
+}
+
+--[[
+	These keys invert the condition expressed by the Expectation.
+]]
+local NEGATION_KEYS = {
+	never = true,
+}
+
+--[[
+	Extension of Lua's 'assert' that lets you specify an error level.
+]]
+local function assertLevel(condition, message, level)
+	message = message or "Assertion failed!"
+	level = level or 1
+
+	if not condition then
+		error(message, level + 1)
+	end
+end
+
+--[[
+	Returns a version of the given method that can be called with either . or :
+]]
+local function bindSelf(self, method)
+	return function(firstArg, ...)
+		if firstArg == self then
+			return method(self, ...)
+		else
+			return method(self, firstArg, ...)
+		end
+	end
+end
+
+local function formatMessage(result, trueMessage, falseMessage)
+	if result then
+		return trueMessage
+	else
+		return falseMessage
+	end
+end
+
+--[[
+	Create a new expectation
+]]
+function Expectation.new(value)
+	local self = {
+		value = value,
+		successCondition = true,
+		condition = false,
+		matchers = {},
+		_boundMatchers = {},
+	}
+
+	setmetatable(self, Expectation)
+
+	self.a = bindSelf(self, self.a)
+	self.an = self.a
+	self.ok = bindSelf(self, self.ok)
+	self.equal = bindSelf(self, self.equal)
+	self.throw = bindSelf(self, self.throw)
+	self.near = bindSelf(self, self.near)
+
+	return self
+end
+
+function Expectation.checkMatcherNameCollisions(name)
+	if SELF_KEYS[name] or NEGATION_KEYS[name] or Expectation[name] then
+		return false
+	end
+
+	return true
+end
+
+function Expectation:extend(matchers)
+	self.matchers = matchers or {}
+
+	for name, implementation in pairs(self.matchers) do
+		self._boundMatchers[name] = bindSelf(self, function(_self, ...)
+			local result = implementation(self.value, ...)
+			local pass = result.pass == self.successCondition
+
+			assertLevel(pass, result.message, 3)
+			self:_resetModifiers()
+			return self
+		end)
+	end
+
+	return self
+end
+
+function Expectation.__index(self, key)
+	-- Keys that don't do anything except improve readability
+	if SELF_KEYS[key] then
+		return self
+	end
+
+	-- Invert your assertion
+	if NEGATION_KEYS[key] then
+		local newExpectation = Expectation.new(self.value):extend(self.matchers)
+		newExpectation.successCondition = not self.successCondition
+
+		return newExpectation
+	end
+
+	if self._boundMatchers[key] then
+		return self._boundMatchers[key]
+	end
+
+	-- Fall back to methods provided by Expectation
+	return Expectation[key]
+end
+
+--[[
+	Called by expectation terminators to reset modifiers in a statement.
+
+	This makes chains like:
+
+		expect(5)
+			.never.to.equal(6)
+			.to.equal(5)
+
+	Work as expected.
+]]
+function Expectation:_resetModifiers()
+	self.successCondition = true
+end
+
+--[[
+	Assert that the expectation value is the given type.
+
+	expect(5).to.be.a("number")
+]]
+function Expectation:a(typeName)
+	local result = (type(self.value) == typeName) == self.successCondition
+
+	local message = formatMessage(self.successCondition,
+		("Expected value of type %q, got value %q of type %s"):format(
+			typeName,
+			tostring(self.value),
+			type(self.value)
+		),
+		("Expected value not of type %q, got value %q of type %s"):format(
+			typeName,
+			tostring(self.value),
+			type(self.value)
+		)
+	)
+
+	assertLevel(result, message, 3)
+	self:_resetModifiers()
+
+	return self
+end
+
+-- Make alias public on class
+Expectation.an = Expectation.a
+
+--[[
+	Assert that our expectation value is truthy
+]]
+function Expectation:ok()
+	local result = (self.value ~= nil) == self.successCondition
+
+	local message = formatMessage(self.successCondition,
+		("Expected value %q to be non-nil"):format(
+			tostring(self.value)
+		),
+		("Expected value %q to be nil"):format(
+			tostring(self.value)
+		)
+	)
+
+	assertLevel(result, message, 3)
+	self:_resetModifiers()
+
+	return self
+end
+
+--[[
+	Assert that our expectation value is equal to another value
+]]
+function Expectation:equal(otherValue)
+	local result = (self.value == otherValue) == self.successCondition
+
+	local message = formatMessage(self.successCondition,
+		("Expected value %q (%s), got %q (%s) instead"):format(
+			tostring(otherValue),
+			type(otherValue),
+			tostring(self.value),
+			type(self.value)
+		),
+		("Expected anything but value %q (%s)"):format(
+			tostring(otherValue),
+			type(otherValue)
+		)
+	)
+
+	assertLevel(result, message, 3)
+	self:_resetModifiers()
+
+	return self
+end
+
+--[[
+	Assert that our expectation value is equal to another value within some
+	inclusive limit.
+]]
+function Expectation:near(otherValue, limit)
+	assert(type(self.value) == "number", "Expectation value must be a number to use 'near'")
+	assert(type(otherValue) == "number", "otherValue must be a number")
+	assert(type(limit) == "number" or limit == nil, "limit must be a number or nil")
+
+	limit = limit or 1e-7
+
+	local result = (math.abs(self.value - otherValue) <= limit) == self.successCondition
+
+	local message = formatMessage(self.successCondition,
+		("Expected value to be near %f (within %f) but got %f instead"):format(
+			otherValue,
+			limit,
+			self.value
+		),
+		("Expected value to not be near %f (within %f) but got %f instead"):format(
+			otherValue,
+			limit,
+			self.value
+		)
+	)
+
+	assertLevel(result, message, 3)
+	self:_resetModifiers()
+
+	return self
+end
+
+--[[
+	Assert that our functoid expectation value throws an error when called.
+	An optional error message can be passed to assert that the error message
+	contains the given value.
+]]
+function Expectation:throw(messageSubstring)
+	local ok, err = pcall(self.value)
+	local result = ok ~= self.successCondition
+
+	if messageSubstring and not ok then
+		if self.successCondition then
+			result = err:find(messageSubstring, 1, true) ~= nil
+		else
+			result = err:find(messageSubstring, 1, true) == nil
+		end
+	end
+
+	local message
+
+	if messageSubstring then
+		message = formatMessage(self.successCondition,
+			("Expected function to throw an error containing %q, but it %s"):format(
+				messageSubstring,
+				err and ("threw: %s"):format(err) or "did not throw."
+			),
+			("Expected function to never throw an error containing %q, but it threw: %s"):format(
+				messageSubstring,
+				tostring(err)
+			)
+		)
+	else
+		message = formatMessage(self.successCondition,
+			"Expected function to throw an error, but it did not throw.",
+			("Expected function to succeed, but it threw an error: %s"):format(
+				tostring(err)
+			)
+		)
+	end
+
+	assertLevel(result, message, 3)
+	self:_resetModifiers()
+
+	return self
+end
+
+return Expectation
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="13">
+        <Properties>
+          <string name="Name">ExpectationContext</string>
+          <string name="Source"><![CDATA[local Expectation = require(script.Parent.Expectation)
+local checkMatcherNameCollisions = Expectation.checkMatcherNameCollisions
+
+local function copy(t)
+	local result = {}
+
+	for key, value in pairs(t) do
+		result[key] = value
+	end
+
+	return result
+end
+
+local ExpectationContext = {}
+ExpectationContext.__index = ExpectationContext
+
+function ExpectationContext.new(parent)
+	local self = {
+		_extensions = parent and copy(parent._extensions) or {},
+	}
+
+	return setmetatable(self, ExpectationContext)
+end
+
+function ExpectationContext:startExpectationChain(...)
+	return Expectation.new(...):extend(self._extensions)
+end
+
+function ExpectationContext:extend(config)
+	for key, value in pairs(config) do
+		assert(self._extensions[key] == nil, string.format("Cannot reassign %q in expect.extend", key))
+		assert(checkMatcherNameCollisions(key), string.format("Cannot overwrite matcher %q; it already exists", key))
+
+		self._extensions[key] = value
+	end
+end
+
+return ExpectationContext
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="14">
+        <Properties>
+          <string name="Name">LifecycleHooks</string>
+          <string name="Source"><![CDATA[local TestEnum = require(script.Parent.TestEnum)
+
+local LifecycleHooks = {}
+LifecycleHooks.__index = LifecycleHooks
+
+function LifecycleHooks.new()
+	local self = {
+		_stack = {},
+	}
+	return setmetatable(self, LifecycleHooks)
+end
+
+--[[
+	Returns an array of `beforeEach` hooks in FIFO order
+]]
+function LifecycleHooks:getBeforeEachHooks()
+	local key = TestEnum.NodeType.BeforeEach
+	local hooks = {}
+
+	for _, level in ipairs(self._stack) do
+		for _, hook in ipairs(level[key]) do
+			table.insert(hooks, hook)
+		end
+	end
+
+	return hooks
+end
+
+--[[
+	Returns an array of `afterEach` hooks in FILO order
+]]
+function LifecycleHooks:getAfterEachHooks()
+	local key = TestEnum.NodeType.AfterEach
+	local hooks = {}
+
+	for _, level in ipairs(self._stack) do
+		for _, hook in ipairs(level[key]) do
+			table.insert(hooks, 1, hook)
+		end
+	end
+
+	return hooks
+end
+
+--[[
+	Pushes uncalled beforeAll and afterAll hooks back up the stack
+]]
+function LifecycleHooks:popHooks()
+	table.remove(self._stack, #self._stack)
+end
+
+function LifecycleHooks:pushHooksFrom(planNode)
+	assert(planNode ~= nil)
+
+	table.insert(self._stack, {
+		[TestEnum.NodeType.BeforeAll] = self:_getHooksOfType(planNode.children, TestEnum.NodeType.BeforeAll),
+		[TestEnum.NodeType.AfterAll] = self:_getHooksOfType(planNode.children, TestEnum.NodeType.AfterAll),
+		[TestEnum.NodeType.BeforeEach] = self:_getHooksOfType(planNode.children, TestEnum.NodeType.BeforeEach),
+		[TestEnum.NodeType.AfterEach] = self:_getHooksOfType(planNode.children, TestEnum.NodeType.AfterEach),
+	})
+end
+
+--[[
+	Get the beforeAll hooks from the current level.
+]]
+function LifecycleHooks:getBeforeAllHooks()
+	return self._stack[#self._stack][TestEnum.NodeType.BeforeAll]
+end
+
+--[[
+	Get the afterAll hooks from the current level.
+]]
+function LifecycleHooks:getAfterAllHooks()
+	return self._stack[#self._stack][TestEnum.NodeType.AfterAll]
+end
+
+function LifecycleHooks:_getHooksOfType(nodes, key)
+	local hooks = {}
+
+	for _, node in ipairs(nodes) do
+		if node.type == key then
+			table.insert(hooks, node.callback)
+		end
+	end
+
+	return hooks
+end
+
+return LifecycleHooks
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="15">
+        <Properties>
+          <string name="Name">Reporters</string>
+        </Properties>
+        <Item class="ModuleScript" referent="16">
+          <Properties>
+            <string name="Name">TeamCityReporter</string>
+            <string name="Source">local TestService = game:GetService("TestService")
+
+local TestEnum = require(script.Parent.Parent.TestEnum)
+
+local TeamCityReporter = {}
+
+local function teamCityEscape(str)
+	str = string.gsub(str, "([]|'[])","|%1")
+	str = string.gsub(str, "\r", "|r")
+	str = string.gsub(str, "\n", "|n")
+	return str
+end
+
+local function teamCityEnterSuite(suiteName)
+	return string.format("##teamcity[testSuiteStarted name='%s']", teamCityEscape(suiteName))
+end
+
+local function teamCityLeaveSuite(suiteName)
+	return string.format("##teamcity[testSuiteFinished name='%s']", teamCityEscape(suiteName))
+end
+
+local function teamCityEnterCase(caseName)
+	return string.format("##teamcity[testStarted name='%s']", teamCityEscape(caseName))
+end
+
+local function teamCityLeaveCase(caseName)
+	return string.format("##teamcity[testFinished name='%s']", teamCityEscape(caseName))
+end
+
+local function teamCityFailCase(caseName, errorMessage)
+	return string.format("##teamcity[testFailed name='%s' message='%s']",
+		teamCityEscape(caseName), teamCityEscape(errorMessage))
+end
+
+local function reportNode(node, buffer, level)
+	buffer = buffer or {}
+	level = level or 0
+	if node.status == TestEnum.TestStatus.Skipped then
+		return buffer
+	end
+	if node.planNode.type == TestEnum.NodeType.Describe then
+		table.insert(buffer, teamCityEnterSuite(node.planNode.phrase))
+		for _, child in ipairs(node.children) do
+			reportNode(child, buffer, level + 1)
+		end
+		table.insert(buffer, teamCityLeaveSuite(node.planNode.phrase))
+	else
+		table.insert(buffer, teamCityEnterCase(node.planNode.phrase))
+		if node.status == TestEnum.TestStatus.Failure then
+			table.insert(buffer, teamCityFailCase(node.planNode.phrase, table.concat(node.errors,"\n")))
+		end
+		table.insert(buffer, teamCityLeaveCase(node.planNode.phrase))
+	end
+end
+
+local function reportRoot(node)
+	local buffer = {}
+
+	for _, child in ipairs(node.children) do
+		reportNode(child, buffer, 0)
+	end
+
+	return buffer
+end
+
+local function report(root)
+	local buffer = reportRoot(root)
+
+	return table.concat(buffer, "\n")
+end
+
+function TeamCityReporter.report(results)
+	local resultBuffer = {
+		"Test results:",
+		report(results),
+		("%d passed, %d failed, %d skipped"):format(
+			results.successCount,
+			results.failureCount,
+			results.skippedCount
+		)
+	}
+
+	print(table.concat(resultBuffer, "\n"))
+
+	if results.failureCount &gt; 0 then
+		print(("%d test nodes reported failures."):format(results.failureCount))
+	end
+
+	if #results.errors &gt; 0 then
+		print("Errors reported by tests:")
+		print("")
+
+		for _, message in ipairs(results.errors) do
+			TestService:Error(message)
+
+			-- Insert a blank line after each error
+			print("")
+		end
+	end
+end
+
+return TeamCityReporter</string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="17">
+          <Properties>
+            <string name="Name">TextReporter</string>
+            <string name="Source">--[[
+	The TextReporter uses the results from a completed test to output text to
+	standard output and TestService.
+]]
+
+local TestService = game:GetService("TestService")
+
+local TestEnum = require(script.Parent.Parent.TestEnum)
+
+local INDENT = (" "):rep(3)
+local STATUS_SYMBOLS = {
+	[TestEnum.TestStatus.Success] = "+",
+	[TestEnum.TestStatus.Failure] = "-",
+	[TestEnum.TestStatus.Skipped] = "~"
+}
+local UNKNOWN_STATUS_SYMBOL = "?"
+
+local TextReporter = {}
+
+local function compareNodes(a, b)
+	return a.planNode.phrase:lower() &lt; b.planNode.phrase:lower()
+end
+
+local function reportNode(node, buffer, level)
+	buffer = buffer or {}
+	level = level or 0
+
+	if node.status == TestEnum.TestStatus.Skipped then
+		return buffer
+	end
+
+	local line
+
+	if node.status then
+		local symbol = STATUS_SYMBOLS[node.status] or UNKNOWN_STATUS_SYMBOL
+
+		line = ("%s[%s] %s"):format(
+			INDENT:rep(level),
+			symbol,
+			node.planNode.phrase
+		)
+	else
+		line = ("%s%s"):format(
+			INDENT:rep(level),
+			node.planNode.phrase
+		)
+	end
+
+	table.insert(buffer, line)
+	table.sort(node.children, compareNodes)
+
+	for _, child in ipairs(node.children) do
+		reportNode(child, buffer, level + 1)
+	end
+
+	return buffer
+end
+
+local function reportRoot(node)
+	local buffer = {}
+	table.sort(node.children, compareNodes)
+
+	for _, child in ipairs(node.children) do
+		reportNode(child, buffer, 0)
+	end
+
+	return buffer
+end
+
+local function report(root)
+	local buffer = reportRoot(root)
+
+	return table.concat(buffer, "\n")
+end
+
+function TextReporter.report(results)
+	local resultBuffer = {
+		"Test results:",
+		report(results),
+		("%d passed, %d failed, %d skipped"):format(
+			results.successCount,
+			results.failureCount,
+			results.skippedCount
+		)
+	}
+
+	print(table.concat(resultBuffer, "\n"))
+
+	if results.failureCount &gt; 0 then
+		print(("%d test nodes reported failures."):format(results.failureCount))
+	end
+
+	if #results.errors &gt; 0 then
+		print("Errors reported by tests:")
+		print("")
+
+		for _, message in ipairs(results.errors) do
+			TestService:Error(message)
+
+			-- Insert a blank line after each error
+			print("")
+		end
+	end
+end
+
+return TextReporter</string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="18">
+          <Properties>
+            <string name="Name">TextReporterQuiet</string>
+            <string name="Source">--[[
+	Copy of TextReporter that doesn't output successful tests.
+
+	This should be temporary, it's just a workaround to make CI environments
+	happy in the short-term.
+]]
+
+local TestService = game:GetService("TestService")
+
+local TestEnum = require(script.Parent.Parent.TestEnum)
+
+local INDENT = (" "):rep(3)
+local STATUS_SYMBOLS = {
+	[TestEnum.TestStatus.Success] = "+",
+	[TestEnum.TestStatus.Failure] = "-",
+	[TestEnum.TestStatus.Skipped] = "~"
+}
+local UNKNOWN_STATUS_SYMBOL = "?"
+
+local TextReporterQuiet = {}
+
+local function reportNode(node, buffer, level)
+	buffer = buffer or {}
+	level = level or 0
+
+	if node.status == TestEnum.TestStatus.Skipped then
+		return buffer
+	end
+
+	local line
+
+	if node.status ~= TestEnum.TestStatus.Success then
+		local symbol = STATUS_SYMBOLS[node.status] or UNKNOWN_STATUS_SYMBOL
+
+		line = ("%s[%s] %s"):format(
+			INDENT:rep(level),
+			symbol,
+			node.planNode.phrase
+		)
+	end
+
+	table.insert(buffer, line)
+
+	for _, child in ipairs(node.children) do
+		reportNode(child, buffer, level + 1)
+	end
+
+	return buffer
+end
+
+local function reportRoot(node)
+	local buffer = {}
+
+	for _, child in ipairs(node.children) do
+		reportNode(child, buffer, 0)
+	end
+
+	return buffer
+end
+
+local function report(root)
+	local buffer = reportRoot(root)
+
+	return table.concat(buffer, "\n")
+end
+
+function TextReporterQuiet.report(results)
+	local resultBuffer = {
+		"Test results:",
+		report(results),
+		("%d passed, %d failed, %d skipped"):format(
+			results.successCount,
+			results.failureCount,
+			results.skippedCount
+		)
+	}
+
+	print(table.concat(resultBuffer, "\n"))
+
+	if results.failureCount &gt; 0 then
+		print(("%d test nodes reported failures."):format(results.failureCount))
+	end
+
+	if #results.errors &gt; 0 then
+		print("Errors reported by tests:")
+		print("")
+
+		for _, message in ipairs(results.errors) do
+			TestService:Error(message)
+
+			-- Insert a blank line after each error
+			print("")
+		end
+	end
+end
+
+return TextReporterQuiet</string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="ModuleScript" referent="19">
+        <Properties>
+          <string name="Name">TestBootstrap</string>
+          <string name="Source">--[[
+	Provides an interface to quickly run and report tests from a given object.
+]]
+
+local TestPlanner = require(script.Parent.TestPlanner)
+local TestRunner = require(script.Parent.TestRunner)
+local TextReporter = require(script.Parent.Reporters.TextReporter)
+
+local TestBootstrap = {}
+
+local function stripSpecSuffix(name)
+	return (name:gsub("%.spec$", ""))
+end
+local function isSpecScript(aScript)
+	return aScript:IsA("ModuleScript") and aScript.Name:match("%.spec$")
+end
+
+local function getPath(module, root)
+	root = root or game
+
+	local path = {}
+	local last = module
+
+	if last.Name == "init.spec" then
+		-- Use the directory's node for init.spec files.
+		last = last.Parent
+	end
+
+	while last ~= nil and last ~= root do
+		table.insert(path, stripSpecSuffix(last.Name))
+		last = last.Parent
+	end
+	table.insert(path, stripSpecSuffix(root.Name))
+
+	return path
+end
+
+local function toStringPath(tablePath)
+	local stringPath = ""
+	local first = true
+	for _, element in ipairs(tablePath) do
+		if first then
+			stringPath = element
+			first = false
+		else
+			stringPath = element .. " " .. stringPath
+		end
+	end
+	return stringPath
+end
+
+function TestBootstrap:getModulesImpl(root, modules, current)
+	modules = modules or {}
+	current = current or root
+
+	if isSpecScript(current) then
+		local method = require(current)
+		local path = getPath(current, root)
+		local pathString = toStringPath(path)
+
+		table.insert(modules, {
+			method = method,
+			path = path,
+			pathStringForSorting = pathString:lower()
+		})
+	end
+end
+
+--[[
+	Find all the ModuleScripts in this tree that are tests.
+]]
+function TestBootstrap:getModules(root)
+	local modules = {}
+
+	self:getModulesImpl(root, modules)
+
+	for _, child in ipairs(root:GetDescendants()) do
+		self:getModulesImpl(root, modules, child)
+	end
+
+	return modules
+end
+
+--[[
+	Runs all test and reports the results using the given test reporter.
+
+	If no reporter is specified, a reasonable default is provided.
+
+	This function demonstrates the expected workflow with this testing system:
+	1. Locate test modules
+	2. Generate test plan
+	3. Run test plan
+	4. Report test results
+
+	This means we could hypothetically present a GUI to the developer that shows
+	the test plan before we execute it, allowing them to toggle specific tests
+	before they're run, but after they've been identified!
+]]
+function TestBootstrap:run(roots, reporter, otherOptions)
+	reporter = reporter or TextReporter
+
+	otherOptions = otherOptions or {}
+	local showTimingInfo = otherOptions["showTimingInfo"] or false
+	local testNamePattern = otherOptions["testNamePattern"]
+	local extraEnvironment = otherOptions["extraEnvironment"] or {}
+
+	if type(roots) ~= "table" then
+		error(("Bad argument #1 to TestBootstrap:run. Expected table, got %s"):format(typeof(roots)), 2)
+	end
+
+	local startTime = tick()
+
+	local modules = {}
+	for _, subRoot in ipairs(roots) do
+		local newModules = self:getModules(subRoot)
+
+		for _, newModule in ipairs(newModules) do
+			table.insert(modules, newModule)
+		end
+	end
+
+	local afterModules = tick()
+
+	local plan = TestPlanner.createPlan(modules, testNamePattern, extraEnvironment)
+	local afterPlan = tick()
+
+	local results = TestRunner.runPlan(plan)
+	local afterRun = tick()
+
+	reporter.report(results)
+	local afterReport = tick()
+
+	if showTimingInfo then
+		local timing = {
+			("Took %f seconds to locate test modules"):format(afterModules - startTime),
+			("Took %f seconds to create test plan"):format(afterPlan - afterModules),
+			("Took %f seconds to run tests"):format(afterRun - afterPlan),
+			("Took %f seconds to report tests"):format(afterReport - afterRun),
+		}
+
+		print(table.concat(timing, "\n"))
+	end
+
+	return results
+end
+
+return TestBootstrap</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="20">
+        <Properties>
+          <string name="Name">TestEnum</string>
+          <string name="Source">--[[
+	Constants used throughout the testing framework.
+]]
+
+local TestEnum = {}
+
+TestEnum.TestStatus = {
+	Success = "Success",
+	Failure = "Failure",
+	Skipped = "Skipped"
+}
+
+TestEnum.NodeType = {
+	Describe = "Describe",
+	It = "It",
+	BeforeAll = "BeforeAll",
+	AfterAll = "AfterAll",
+	BeforeEach = "BeforeEach",
+	AfterEach = "AfterEach"
+}
+
+TestEnum.NodeModifier = {
+	None = "None",
+	Skip = "Skip",
+	Focus = "Focus"
+}
+
+return TestEnum</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="21">
+        <Properties>
+          <string name="Name">TestPlan</string>
+          <string name="Source"><![CDATA[--[[
+	Represents a tree of tests that have been loaded but not necessarily
+	executed yet.
+
+	TestPlan objects are produced by TestPlanner.
+]]
+
+local TestEnum = require(script.Parent.TestEnum)
+local Expectation = require(script.Parent.Expectation)
+
+local function newEnvironment(currentNode, extraEnvironment)
+	local env = {}
+
+	if extraEnvironment then
+		if type(extraEnvironment) ~= "table" then
+			error(("Bad argument #2 to newEnvironment. Expected table, got %s"):format(
+				typeof(extraEnvironment)), 2)
+		end
+
+		for key, value in pairs(extraEnvironment) do
+			env[key] = value
+		end
+	end
+
+	local function addChild(phrase, callback, nodeType, nodeModifier)
+		local node = currentNode:addChild(phrase, nodeType, nodeModifier)
+		node.callback = callback
+		if nodeType == TestEnum.NodeType.Describe then
+			node:expand()
+		end
+		return node
+	end
+
+	function env.describeFOCUS(phrase, callback)
+		addChild(phrase, callback, TestEnum.NodeType.Describe, TestEnum.NodeModifier.Focus)
+	end
+
+	function env.describeSKIP(phrase, callback)
+		addChild(phrase, callback, TestEnum.NodeType.Describe, TestEnum.NodeModifier.Skip)
+	end
+
+	function env.describe(phrase, callback, nodeModifier)
+		addChild(phrase, callback, TestEnum.NodeType.Describe, TestEnum.NodeModifier.None)
+	end
+
+	function env.itFOCUS(phrase, callback)
+		addChild(phrase, callback, TestEnum.NodeType.It, TestEnum.NodeModifier.Focus)
+	end
+
+	function env.itSKIP(phrase, callback)
+		addChild(phrase, callback, TestEnum.NodeType.It, TestEnum.NodeModifier.Skip)
+	end
+
+	function env.itFIXME(phrase, callback)
+		local node = addChild(phrase, callback, TestEnum.NodeType.It, TestEnum.NodeModifier.Skip)
+		warn("FIXME: broken test", node:getFullName())
+	end
+
+	function env.it(phrase, callback, nodeModifier)
+		addChild(phrase, callback, TestEnum.NodeType.It, TestEnum.NodeModifier.None)
+	end
+
+	-- Incrementing counter used to ensure that beforeAll, afterAll, beforeEach, afterEach have unique phrases
+	local lifecyclePhaseId = 0
+
+	local lifecycleHooks = {
+		[TestEnum.NodeType.BeforeAll] = "beforeAll",
+		[TestEnum.NodeType.AfterAll] = "afterAll",
+		[TestEnum.NodeType.BeforeEach] = "beforeEach",
+		[TestEnum.NodeType.AfterEach] = "afterEach"
+	}
+
+	for nodeType, name in pairs(lifecycleHooks) do
+		env[name] = function(callback)
+			addChild(name .. "_" .. tostring(lifecyclePhaseId), callback, nodeType, TestEnum.NodeModifier.None)
+			lifecyclePhaseId = lifecyclePhaseId + 1
+		end
+	end
+
+	function env.FIXME(optionalMessage)
+		warn("FIXME: broken test", currentNode:getFullName(), optionalMessage or "")
+
+		currentNode.modifier = TestEnum.NodeModifier.Skip
+	end
+
+	function env.FOCUS()
+		currentNode.modifier = TestEnum.NodeModifier.Focus
+	end
+
+	function env.SKIP()
+		currentNode.modifier = TestEnum.NodeModifier.Skip
+	end
+
+	--[[
+		This function is deprecated. Calling it is a no-op beyond generating a
+		warning.
+	]]
+	function env.HACK_NO_XPCALL()
+		warn("HACK_NO_XPCALL is deprecated. It is now safe to yield in an " ..
+			"xpcall, so this is no longer necessary. It can be safely deleted.")
+	end
+
+	env.fit = env.itFOCUS
+	env.xit = env.itSKIP
+	env.fdescribe = env.describeFOCUS
+	env.xdescribe = env.describeSKIP
+
+	env.expect = setmetatable({
+		extend = function(...)
+			error("Cannot call \"expect.extend\" from within a \"describe\" node.")
+		end,
+	}, {
+		__call = function(_self, ...)
+			return Expectation.new(...)
+		end,
+	})
+
+	return env
+end
+
+local TestNode = {}
+TestNode.__index = TestNode
+
+--[[
+	Create a new test node. A pointer to the test plan, a phrase to describe it
+	and the type of node it is are required. The modifier is optional and will
+	be None if left blank.
+]]
+function TestNode.new(plan, phrase, nodeType, nodeModifier)
+	nodeModifier = nodeModifier or TestEnum.NodeModifier.None
+
+	local node = {
+		plan = plan,
+		phrase = phrase,
+		type = nodeType,
+		modifier = nodeModifier,
+		children = {},
+		callback = nil,
+		parent = nil,
+	}
+
+	node.environment = newEnvironment(node, plan.extraEnvironment)
+	return setmetatable(node, TestNode)
+end
+
+local function getModifier(name, pattern, modifier)
+	if pattern and (modifier == nil or modifier == TestEnum.NodeModifier.None) then
+		if name:match(pattern) then
+			return TestEnum.NodeModifier.Focus
+		else
+			return TestEnum.NodeModifier.Skip
+		end
+	end
+	return modifier
+end
+
+function TestNode:addChild(phrase, nodeType, nodeModifier)
+	if nodeType == TestEnum.NodeType.It then
+		for _, child in pairs(self.children) do
+			if child.phrase == phrase then
+				error("Duplicate it block found: " .. child:getFullName())
+			end
+		end
+	end
+
+	local childName = self:getFullName() .. " " .. phrase
+	nodeModifier = getModifier(childName, self.plan.testNamePattern, nodeModifier)
+	local child = TestNode.new(self.plan, phrase, nodeType, nodeModifier)
+	child.parent = self
+	table.insert(self.children, child)
+	return child
+end
+
+--[[
+	Join the names of all the nodes back to the parent.
+]]
+function TestNode:getFullName()
+	if self.parent then
+		local parentPhrase = self.parent:getFullName()
+		if parentPhrase then
+			return parentPhrase .. " " .. self.phrase
+		end
+	end
+	return self.phrase
+end
+
+--[[
+	Expand a node by setting its callback environment and then calling it. Any
+	further it and describe calls within the callback will be added to the tree.
+]]
+function TestNode:expand()
+	local originalEnv = getfenv(self.callback)
+	local callbackEnv = setmetatable({}, { __index = originalEnv })
+	for key, value in pairs(self.environment) do
+		callbackEnv[key] = value
+	end
+	-- Copy 'script' directly to new env to make Studio debugger happy.
+	-- Studio debugger does not look into __index, because of security reasons
+	callbackEnv.script = originalEnv.script
+	setfenv(self.callback, callbackEnv)
+
+	local success, result = xpcall(self.callback, function(message)
+		return debug.traceback(tostring(message), 2)
+	end)
+
+	if not success then
+		self.loadError = result
+	end
+end
+
+local TestPlan = {}
+TestPlan.__index = TestPlan
+
+--[[
+	Create a new, empty TestPlan.
+]]
+function TestPlan.new(testNamePattern, extraEnvironment)
+	local plan = {
+		children = {},
+		testNamePattern = testNamePattern,
+		extraEnvironment = extraEnvironment,
+	}
+
+	return setmetatable(plan, TestPlan)
+end
+
+--[[
+	Add a new child under the test plan's root node.
+]]
+function TestPlan:addChild(phrase, nodeType, nodeModifier)
+	nodeModifier = getModifier(phrase, self.testNamePattern, nodeModifier)
+	local child = TestNode.new(self, phrase, nodeType, nodeModifier)
+	table.insert(self.children, child)
+	return child
+end
+
+--[[
+	Add a new describe node with the given method as a callback. Generates or
+	reuses all the describe nodes along the path.
+]]
+function TestPlan:addRoot(path, method)
+	local curNode = self
+	for i = #path, 1, -1 do
+		local nextNode = nil
+
+		for _, child in ipairs(curNode.children) do
+			if child.phrase == path[i] then
+				nextNode = child
+				break
+			end
+		end
+
+		if nextNode == nil then
+			nextNode = curNode:addChild(path[i], TestEnum.NodeType.Describe)
+		end
+
+		curNode = nextNode
+	end
+
+	curNode.callback = method
+	curNode:expand()
+end
+
+--[[
+	Calls the given callback on all nodes in the tree, traversed depth-first.
+]]
+function TestPlan:visitAllNodes(callback, root, level)
+	root = root or self
+	level = level or 0
+
+	for _, child in ipairs(root.children) do
+		callback(child, level)
+
+		self:visitAllNodes(callback, child, level + 1)
+	end
+end
+
+--[[
+	Visualizes the test plan in a simple format, suitable for debugging the test
+	plan's structure.
+]]
+function TestPlan:visualize()
+	local buffer = {}
+	self:visitAllNodes(function(node, level)
+		table.insert(buffer, (" "):rep(3 * level) .. node.phrase)
+	end)
+	return table.concat(buffer, "\n")
+end
+
+--[[
+	Gets a list of all nodes in the tree for which the given callback returns
+	true.
+]]
+function TestPlan:findNodes(callback)
+	local results = {}
+	self:visitAllNodes(function(node)
+		if callback(node) then
+			table.insert(results, node)
+		end
+	end)
+	return results
+end
+
+return TestPlan
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="22">
+        <Properties>
+          <string name="Name">TestPlanner</string>
+          <string name="Source">--[[
+	Turns a series of specification functions into a test plan.
+
+	Uses a TestPlanBuilder to keep track of the state of the tree being built.
+]]
+local TestPlan = require(script.Parent.TestPlan)
+
+local TestPlanner = {}
+
+--[[
+	Create a new TestPlan from a list of specification functions.
+
+	These functions should call a combination of `describe` and `it` (and their
+	variants), which will be turned into a test plan to be executed.
+
+	Parameters:
+		- modulesList - list of tables describing test modules {
+			method, -- specification function described above
+			path, -- array of parent entires, first element is the leaf that owns `method`
+			pathStringForSorting -- a string representation of `path`, used for sorting of the test plan
+		}
+		- testNamePattern - Only tests matching this Lua pattern string will run. Pass empty or nil to run all tests
+		- extraEnvironment - Lua table holding additional functions and variables to be injected into the specification
+							function during execution
+]]
+function TestPlanner.createPlan(modulesList, testNamePattern, extraEnvironment)
+	local plan = TestPlan.new(testNamePattern, extraEnvironment)
+
+	table.sort(modulesList, function(a, b)
+		return a.pathStringForSorting &lt; b.pathStringForSorting
+	end)
+
+	for _, module in ipairs(modulesList) do
+		plan:addRoot(module.path, module.method)
+	end
+
+	return plan
+end
+
+return TestPlanner</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="23">
+        <Properties>
+          <string name="Name">TestResults</string>
+          <string name="Source">--[[
+	Represents a tree of test results.
+
+	Each node in the tree corresponds directly to a node in a corresponding
+	TestPlan, accessible via the 'planNode' field.
+
+	TestResults objects are produced by TestRunner using TestSession as state.
+]]
+
+local TestEnum = require(script.Parent.TestEnum)
+
+local STATUS_SYMBOLS = {
+	[TestEnum.TestStatus.Success] = "+",
+	[TestEnum.TestStatus.Failure] = "-",
+	[TestEnum.TestStatus.Skipped] = "~"
+}
+
+local TestResults = {}
+
+TestResults.__index = TestResults
+
+--[[
+	Create a new TestResults tree that's linked to the given TestPlan.
+]]
+function TestResults.new(plan)
+	local self = {
+		successCount = 0,
+		failureCount = 0,
+		skippedCount = 0,
+		planNode = plan,
+		children = {},
+		errors = {}
+	}
+
+	setmetatable(self, TestResults)
+
+	return self
+end
+
+--[[
+	Create a new result node that can be inserted into a TestResult tree.
+]]
+function TestResults.createNode(planNode)
+	local node = {
+		planNode = planNode,
+		children = {},
+		errors = {},
+		status = nil
+	}
+
+	return node
+end
+
+--[[
+	Visit all test result nodes, depth-first.
+]]
+function TestResults:visitAllNodes(callback, root)
+	root = root or self
+
+	for _, child in ipairs(root.children) do
+		callback(child)
+
+		self:visitAllNodes(callback, child)
+	end
+end
+
+--[[
+	Creates a debug visualization of the test results.
+]]
+function TestResults:visualize(root, level)
+	root = root or self
+	level = level or 0
+
+	local buffer = {}
+
+	for _, child in ipairs(root.children) do
+		if child.planNode.type == TestEnum.NodeType.It then
+			local symbol = STATUS_SYMBOLS[child.status] or "?"
+			local str = ("%s[%s] %s"):format(
+				(" "):rep(3 * level),
+				symbol,
+				child.planNode.phrase
+			)
+
+			if child.messages and #child.messages &gt; 0 then
+				str = str .. "\n " .. (" "):rep(3 * level) .. table.concat(child.messages, "\n " .. (" "):rep(3 * level))
+			end
+
+			table.insert(buffer, str)
+		else
+			local str = ("%s%s"):format(
+				(" "):rep(3 * level),
+				child.planNode.phrase or ""
+			)
+
+			if child.status then
+				str = str .. (" (%s)"):format(child.status)
+			end
+
+			table.insert(buffer, str)
+
+			if #child.children &gt; 0 then
+				local text = self:visualize(child, level + 1)
+				table.insert(buffer, text)
+			end
+		end
+	end
+
+	return table.concat(buffer, "\n")
+end
+
+return TestResults</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="24">
+        <Properties>
+          <string name="Name">TestRunner</string>
+          <string name="Source"><![CDATA[--[[
+	Contains the logic to run a test plan and gather test results from it.
+
+	TestRunner accepts a TestPlan object, executes the planned tests, and
+	produces a TestResults object. While the tests are running, the system's
+	state is contained inside a TestSession object.
+]]
+
+local TestEnum = require(script.Parent.TestEnum)
+local TestSession = require(script.Parent.TestSession)
+local LifecycleHooks = require(script.Parent.LifecycleHooks)
+
+local RUNNING_GLOBAL = "__TESTEZ_RUNNING_TEST__"
+
+local TestRunner = {
+	environment = {}
+}
+
+local function wrapExpectContextWithPublicApi(expectationContext)
+	return setmetatable({
+		extend = function(...)
+			expectationContext:extend(...)
+		end,
+	}, {
+		__call = function(_self, ...)
+			return expectationContext:startExpectationChain(...)
+		end,
+	})
+end
+
+--[[
+	Runs the given TestPlan and returns a TestResults object representing the
+	results of the run.
+]]
+function TestRunner.runPlan(plan)
+	local session = TestSession.new(plan)
+	local lifecycleHooks = LifecycleHooks.new()
+
+	local exclusiveNodes = plan:findNodes(function(node)
+		return node.modifier == TestEnum.NodeModifier.Focus
+	end)
+
+	session.hasFocusNodes = #exclusiveNodes > 0
+
+	TestRunner.runPlanNode(session, plan, lifecycleHooks)
+
+	return session:finalize()
+end
+
+--[[
+	Run the given test plan node and its descendants, using the given test
+	session to store all of the results.
+]]
+function TestRunner.runPlanNode(session, planNode, lifecycleHooks)
+	local function runCallback(callback, messagePrefix)
+		local success = true
+		local errorMessage
+		-- Any code can check RUNNING_GLOBAL to fork behavior based on
+		-- whether a test is running. We use this to avoid accessing
+		-- protected APIs; it's a workaround that will go away someday.
+		_G[RUNNING_GLOBAL] = true
+
+		messagePrefix = messagePrefix or ""
+
+		local testEnvironment = getfenv(callback)
+
+		for key, value in pairs(TestRunner.environment) do
+			testEnvironment[key] = value
+		end
+
+		testEnvironment.fail = function(message)
+			if message == nil then
+				message = "fail() was called."
+			end
+
+			success = false
+			errorMessage = messagePrefix .. debug.traceback(tostring(message), 2)
+		end
+
+		testEnvironment.expect = wrapExpectContextWithPublicApi(session:getExpectationContext())
+
+		local context = session:getContext()
+
+		local nodeSuccess, nodeResult = xpcall(
+			function()
+				callback(context)
+			end,
+			function(message)
+				return messagePrefix .. debug.traceback(tostring(message), 2)
+			end
+		)
+
+		-- If a node threw an error, we prefer to use that message over
+		-- one created by fail() if it was set.
+		if not nodeSuccess then
+			success = false
+			errorMessage = nodeResult
+		end
+
+		_G[RUNNING_GLOBAL] = nil
+
+		return success, errorMessage
+	end
+
+	local function runNode(childPlanNode)
+		-- Errors can be set either via `error` propagating upwards or
+		-- by a test calling fail([message]).
+
+		for _, hook in ipairs(lifecycleHooks:getBeforeEachHooks()) do
+			local success, errorMessage = runCallback(hook, "beforeEach hook: ")
+			if not success then
+				return false, errorMessage
+			end
+		end
+
+		local testSuccess, testErrorMessage = runCallback(childPlanNode.callback)
+
+		for _, hook in ipairs(lifecycleHooks:getAfterEachHooks()) do
+			local success, errorMessage = runCallback(hook, "afterEach hook: ")
+			if not success then
+				if not testSuccess then
+					return false, testErrorMessage .. "\nWhile cleaning up the failed test another error was found:\n" .. errorMessage
+				end
+				return false, errorMessage
+			end
+		end
+
+		if not testSuccess then
+			return false, testErrorMessage
+		end
+
+		return true, nil
+	end
+
+	lifecycleHooks:pushHooksFrom(planNode)
+
+	local halt = false
+	for _, hook in ipairs(lifecycleHooks:getBeforeAllHooks()) do
+		local success, errorMessage = runCallback(hook, "beforeAll hook: ")
+		if not success then
+			session:addDummyError("beforeAll", errorMessage)
+			halt = true
+		end
+	end
+
+	if not halt then
+		for _, childPlanNode in ipairs(planNode.children) do
+			if childPlanNode.type == TestEnum.NodeType.It then
+				session:pushNode(childPlanNode)
+				if session:shouldSkip() then
+					session:setSkipped()
+				else
+					local success, errorMessage = runNode(childPlanNode)
+
+					if success then
+						session:setSuccess()
+					else
+						session:setError(errorMessage)
+					end
+				end
+				session:popNode()
+			elseif childPlanNode.type == TestEnum.NodeType.Describe then
+				session:pushNode(childPlanNode)
+				TestRunner.runPlanNode(session, childPlanNode, lifecycleHooks)
+
+				-- Did we have an error trying build a test plan?
+				if childPlanNode.loadError then
+					local message = "Error during planning: " .. childPlanNode.loadError
+					session:setError(message)
+				else
+					session:setStatusFromChildren()
+				end
+				session:popNode()
+			end
+		end
+	end
+
+	for _, hook in ipairs(lifecycleHooks:getAfterAllHooks()) do
+		local success, errorMessage = runCallback(hook, "afterAll hook: ")
+		if not success then
+			session:addDummyError("afterAll", errorMessage)
+		end
+	end
+
+	lifecycleHooks:popHooks()
+end
+
+return TestRunner
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="25">
+        <Properties>
+          <string name="Name">TestSession</string>
+          <string name="Source"><![CDATA[--[[
+	Represents the state relevant while executing a test plan.
+
+	Used by TestRunner to produce a TestResults object.
+
+	Uses the same tree building structure as TestPlanBuilder; TestSession keeps
+	track of a stack of nodes that represent the current path through the tree.
+]]
+
+local TestEnum = require(script.Parent.TestEnum)
+local TestResults = require(script.Parent.TestResults)
+local Context = require(script.Parent.Context)
+local ExpectationContext = require(script.Parent.ExpectationContext)
+
+local TestSession = {}
+
+TestSession.__index = TestSession
+
+--[[
+	Create a TestSession related to the given TestPlan.
+
+	The resulting TestResults object will be linked to this TestPlan.
+]]
+function TestSession.new(plan)
+	local self = {
+		results = TestResults.new(plan),
+		nodeStack = {},
+		contextStack = {},
+		expectationContextStack = {},
+		hasFocusNodes = false
+	}
+
+	setmetatable(self, TestSession)
+
+	return self
+end
+
+--[[
+	Calculate success, failure, and skipped test counts in the tree at the
+	current point in the execution.
+]]
+function TestSession:calculateTotals()
+	local results = self.results
+
+	results.successCount = 0
+	results.failureCount = 0
+	results.skippedCount = 0
+
+	results:visitAllNodes(function(node)
+		local status = node.status
+		local nodeType = node.planNode.type
+
+		if nodeType == TestEnum.NodeType.It then
+			if status == TestEnum.TestStatus.Success then
+				results.successCount = results.successCount + 1
+			elseif status == TestEnum.TestStatus.Failure then
+				results.failureCount = results.failureCount + 1
+			elseif status == TestEnum.TestStatus.Skipped then
+				results.skippedCount = results.skippedCount + 1
+			end
+		end
+	end)
+end
+
+--[[
+	Gathers all of the errors reported by tests and puts them at the top level
+	of the TestResults object.
+]]
+function TestSession:gatherErrors()
+	local results = self.results
+
+	results.errors = {}
+
+	results:visitAllNodes(function(node)
+		if #node.errors > 0 then
+			for _, message in ipairs(node.errors) do
+				table.insert(results.errors, message)
+			end
+		end
+	end)
+end
+
+--[[
+	Calculates test totals, verifies the tree is valid, and returns results.
+]]
+function TestSession:finalize()
+	if #self.nodeStack ~= 0 then
+		error("Cannot finalize TestResults with nodes still on the stack!", 2)
+	end
+
+	self:calculateTotals()
+	self:gatherErrors()
+
+	return self.results
+end
+
+--[[
+	Create a new test result node and push it onto the navigation stack.
+]]
+function TestSession:pushNode(planNode)
+	local node = TestResults.createNode(planNode)
+	local lastNode = self.nodeStack[#self.nodeStack] or self.results
+	table.insert(lastNode.children, node)
+	table.insert(self.nodeStack, node)
+
+	local lastContext = self.contextStack[#self.contextStack]
+	local context = Context.new(lastContext)
+	table.insert(self.contextStack, context)
+
+	local lastExpectationContext = self.expectationContextStack[#self.expectationContextStack]
+	local expectationContext = ExpectationContext.new(lastExpectationContext)
+	table.insert(self.expectationContextStack, expectationContext)
+end
+
+--[[
+	Pops a node off of the navigation stack.
+]]
+function TestSession:popNode()
+	assert(#self.nodeStack > 0, "Tried to pop from an empty node stack!")
+	table.remove(self.nodeStack, #self.nodeStack)
+	table.remove(self.contextStack, #self.contextStack)
+	table.remove(self.expectationContextStack, #self.expectationContextStack)
+end
+
+--[[
+	Gets the Context object for the current node.
+]]
+function TestSession:getContext()
+	assert(#self.contextStack > 0, "Tried to get context from an empty stack!")
+	return self.contextStack[#self.contextStack]
+end
+
+
+function TestSession:getExpectationContext()
+	assert(#self.expectationContextStack > 0, "Tried to get expectationContext from an empty stack!")
+	return self.expectationContextStack[#self.expectationContextStack]
+end
+
+--[[
+	Tells whether the current test we're in should be skipped.
+]]
+function TestSession:shouldSkip()
+	-- If our test tree had any exclusive tests, then normal tests are skipped!
+	if self.hasFocusNodes then
+		for i = #self.nodeStack, 1, -1 do
+			local node = self.nodeStack[i]
+
+			-- Skipped tests are still skipped
+			if node.planNode.modifier == TestEnum.NodeModifier.Skip then
+				return true
+			end
+
+			-- Focused tests are the only ones that aren't skipped
+			if node.planNode.modifier == TestEnum.NodeModifier.Focus then
+				return false
+			end
+		end
+
+		return true
+	else
+		for i = #self.nodeStack, 1, -1 do
+			local node = self.nodeStack[i]
+
+			if node.planNode.modifier == TestEnum.NodeModifier.Skip then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+--[[
+	Set the current node's status to Success.
+]]
+function TestSession:setSuccess()
+	assert(#self.nodeStack > 0, "Attempting to set success status on empty stack")
+	self.nodeStack[#self.nodeStack].status = TestEnum.TestStatus.Success
+end
+
+--[[
+	Set the current node's status to Skipped.
+]]
+function TestSession:setSkipped()
+	assert(#self.nodeStack > 0, "Attempting to set skipped status on empty stack")
+	self.nodeStack[#self.nodeStack].status = TestEnum.TestStatus.Skipped
+end
+
+--[[
+	Set the current node's status to Failure and adds a message to its list of
+	errors.
+]]
+function TestSession:setError(message)
+	assert(#self.nodeStack > 0, "Attempting to set error status on empty stack")
+	local last = self.nodeStack[#self.nodeStack]
+	last.status = TestEnum.TestStatus.Failure
+	table.insert(last.errors, message)
+end
+
+--[[
+	Add a dummy child node to the current node to hold the given error. This
+	allows an otherwise empty describe node to report an error in a more natural
+	way.
+]]
+function TestSession:addDummyError(phrase, message)
+	self:pushNode({type = TestEnum.NodeType.It, phrase = phrase})
+	self:setError(message)
+	self:popNode()
+	self.nodeStack[#self.nodeStack].status = TestEnum.TestStatus.Failure
+end
+
+--[[
+	Set the current node's status based on that of its children. If all children
+	are skipped, mark it as skipped. If any are fails, mark it as failed.
+	Otherwise, mark it as success.
+]]
+function TestSession:setStatusFromChildren()
+	assert(#self.nodeStack > 0, "Attempting to set status from children on empty stack")
+
+	local last = self.nodeStack[#self.nodeStack]
+	local status = TestEnum.TestStatus.Success
+	local skipped = true
+
+	-- If all children were skipped, then we were skipped
+	-- If any child failed, then we failed!
+	for _, child in ipairs(last.children) do
+		if child.status ~= TestEnum.TestStatus.Skipped then
+			skipped = false
+
+			if child.status == TestEnum.TestStatus.Failure then
+				status = TestEnum.TestStatus.Failure
+			end
+		end
+	end
+
+	if skipped then
+		status = TestEnum.TestStatus.Skipped
+	end
+
+	last.status = status
+end
+
+return TestSession
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+    <Item class="Folder" referent="26">
+      <Properties>
+        <string name="Name">Tests</string>
+      </Properties>
+      <Item class="ModuleScript" referent="27">
+        <Properties>
+          <string name="Name">KeycardCopier.spec</string>
+          <string name="Source">local KeycardCopier = require(game.ServerScriptService.server.KeycardCopier)
+
+local function makeFakePlayer(userId)
+	return {
+		UserId = userId,
+	}
+end
+
+local function makeOwnedTool(ownerUserId)
+	local tool = Instance.new("Tool")
+	tool.Name = "Keycard"
+
+	local ownerValue = Instance.new("IntValue")
+	ownerValue.Name = "OwnerUserId"
+	ownerValue.Value = ownerUserId
+	ownerValue.Parent = tool
+
+	return tool
+end
+
+return function()
+	describe("KeycardCopier", function()
+		it("allows unlock when the player owns the keycard", function()
+			local player = makeFakePlayer(12345)
+			local tool = makeOwnedTool(12345)
+
+			local unlocked = false
+
+			local result = KeycardCopier.tryUnlock(player, tool, function()
+				unlocked = true
+			end)
+
+			expect(result).to.equal(true)
+			expect(unlocked).to.equal(true)
+		end)
+
+		it("rejects unlock when the keycard belongs to someone else", function()
+			local player = makeFakePlayer(12345)
+			local tool = makeOwnedTool(99999)
+
+			local unlocked = false
+
+			local result = KeycardCopier.tryUnlock(player, tool, function()
+				unlocked = true
+			end)
+
+			expect(result).to.equal(false)
+			expect(unlocked).to.equal(false)
+		end)
+
+		it("rejects unlock when the keycard is missing", function()
+			local player = makeFakePlayer(12345)
+
+			local unlocked = false
+
+			local result = KeycardCopier.tryUnlock(player, nil, function()
+				unlocked = true
+			end)
+
+			expect(result).to.equal(false)
+			expect(unlocked).to.equal(false)
+		end)
+
+		it("does not throw when given invalid input", function()
+			local success, result = pcall(function()
+				return KeycardCopier.tryUnlock(nil, nil, nil)
+			end)
+
+			expect(success).to.equal(true)
+			expect(result).to.equal(false)
+		end)
+	end)
+end</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="28">
+        <Properties>
+          <string name="Name">NarrativeManager.spec</string>
+          <string name="Source">local NarrativeManager = require(game.ReplicatedStorage.Shared.NarrativeManager)
+local IntegrityService = require(game.ReplicatedStorage.Shared.IntegrityService)
+
+local function makeFakePlayer(userId)
+	return {
+		UserId = userId,
+	}
+end
+
+return function()
+	describe("NarrativeManager", function()
+		it("starts a dialogue successfully", function()
+			local player = makeFakePlayer(101)
+
+			local nodeData, err = NarrativeManager.startDialogue(player, "Intro")
+
+			expect(err).to.equal(nil)
+			expect(nodeData).never.to.equal(nil)
+			expect(nodeData.nodeId).to.equal("node1")
+		end)
+
+		it("applies integrity changes when a choice is made", function()
+			local player = makeFakePlayer(102)
+
+			NarrativeManager.startDialogue(player, "Intro")
+			local nextNode = NarrativeManager.chooseOption(player, 1)
+
+			expect(nextNode).never.to.equal(nil)
+			expect(IntegrityService.getIntegrity(player)).to.equal(10)
+		end)
+
+		it("branches correctly to another node", function()
+			local player = makeFakePlayer(103)
+
+			NarrativeManager.startDialogue(player, "Intro")
+			local nextNode = NarrativeManager.chooseOption(player, 2)
+
+			expect(nextNode).never.to.equal(nil)
+			expect(nextNode.nodeId).to.equal("node3")
+		end)
+
+		it("returns an error for invalid choices", function()
+			local player = makeFakePlayer(104)
+
+			NarrativeManager.startDialogue(player, "Intro")
+			local result, err = NarrativeManager.chooseOption(player, 99)
+
+			expect(result).to.equal(nil)
+			expect(err).to.equal("Invalid choice")
+		end)
+	end)
+end</string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="29">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="30">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="Script" referent="31">
+        <Properties>
+          <string name="Name">CameraScript</string>
+          <token name="RunContext">0</token>
+          <string name="Source">local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+
+local UPDATE_RATE = 0.1
+local PUSH_INTERVAL = 0.5
+local SUSPICION_TICK_RATE = 0.25
+local SUSPICION_PER_TICK = 2
+
+local DEFAULT_SWEEP_ANGLE = 60
+local DEFAULT_SWEEP_SPEED = 35
+local DEFAULT_TRACK_SPEED = 140
+local DEFAULT_VISION_RANGE = 80
+local DEFAULT_VISION_ANGLE = 55
+
+local QUESTION_THRESHOLD = 50
+local EXCLAMATION_THRESHOLD = 100
+
+local pendingSuspicion = {}
+local localSuspicionCache = {}
+
+local function addPendingSuspicion(player, amount)
+	if not player then
+		return
+	end
+
+	local userId = player.UserId
+	pendingSuspicion[userId] = (pendingSuspicion[userId] or 0) + amount
+	local localValue = localSuspicionCache[userId] or 0
+	localSuspicionCache[userId] = localValue + amount
+end
+
+task.spawn(function()
+	while task.wait(PUSH_INTERVAL) do
+		for userId, amount in pairs(pendingSuspicion) do
+			if amount and amount &gt; 0 then
+				local player = Players:GetPlayerByUserId(userId)
+				if player then
+					pcall(function()
+						SuspicionManager.Add(amount, player)
+					end)
+				end
+			end
+			pendingSuspicion[userId] = 0
+		end
+	end
+end)
+
+local function getSuspicion(player)
+	if not player then
+		return 0
+	end
+
+	local attr = player:GetAttribute("Suspicion")
+	if typeof(attr) == "number" then
+		return attr
+	end
+
+	if SuspicionManager.Get then
+		local ok, result = pcall(function()
+			return SuspicionManager.Get(player)
+		end)
+		if ok and typeof(result) == "number" then
+			return result
+		end
+	end
+
+	if SuspicionManager.GetSuspicion then
+		local ok, result = pcall(function()
+			return SuspicionManager.GetSuspicion(player)
+		end)
+		if ok and typeof(result) == "number" then
+			return result
+		end
+	end
+
+	return localSuspicionCache[player.UserId] or 0
+end
+
+local function getNumberAttribute(instance, name, fallback)
+	local value = instance:GetAttribute(name)
+	if typeof(value) == "number" then
+		return value
+	end
+	return fallback
+end
+
+local function safeAlive(humanoid)
+	return humanoid and humanoid.Health &gt; 0 and humanoid.Parent
+end
+
+local function getCharacterRoot(player)
+	local character = player and player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+
+	if root and safeAlive(humanoid) then
+		return character, root, humanoid
+	end
+
+	return character, nil, humanoid
+end
+
+local function normalizeAngle(angle)
+	while angle &gt; math.pi do
+		angle -= math.pi * 2
+	end
+	while angle &lt; -math.pi do
+		angle += math.pi * 2
+	end
+	return angle
+end
+
+local function moveTowardAngle(current, target, maxStep)
+	local delta = normalizeAngle(target - current)
+
+	if math.abs(delta) &lt;= maxStep then
+		return target
+	end
+
+	if delta &gt; 0 then
+		return current + maxStep
+	else
+		return current - maxStep
+	end
+end
+
+local function getYawToTarget(baseCFrame, worldPosition)
+	local localPos = baseCFrame:PointToObjectSpace(worldPosition)
+	return math.atan2(-localPos.X, -localPos.Z)
+end
+
+local function getAllCameraModels()
+	local results = {}
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj:IsA("Model") and obj.Name == "Camera" then
+			table.insert(results, obj)
+		end
+	end
+
+	return results
+end
+
+local function createIndicator(part)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "AlertIndicator"
+	billboard.Size = UDim2.new(0, 60, 0, 60)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Enabled = false
+	billboard.Parent = part
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Icon"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBlack
+	label.TextStrokeTransparency = 0.2
+	label.Text = ""
+	label.Parent = billboard
+
+	return billboard, label
+end
+
+local function updateIndicator(state, player)
+	if not player then
+		state.billboard.Enabled = false
+		state.label.Text = ""
+		return
+	end
+
+	local suspicion = getSuspicion(player)
+
+	if suspicion &gt;= EXCLAMATION_THRESHOLD then
+		state.billboard.Enabled = true
+		state.label.Text = "!"
+		state.label.TextColor3 = Color3.fromRGB(255, 70, 70)
+	elseif suspicion &gt;= QUESTION_THRESHOLD then
+		state.billboard.Enabled = true
+		state.label.Text = "?"
+		state.label.TextColor3 = Color3.fromRGB(255, 230, 80)
+	else
+		state.billboard.Enabled = false
+		state.label.Text = ""
+	end
+end
+
+local ignoredInstances = getAllCameraModels()
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.FilterDescendantsInstances = ignoredInstances
+
+local function hasLineOfSight(origin, targetPosition, targetCharacter)
+	local result = Workspace:Raycast(origin, targetPosition - origin, rayParams)
+
+	if not result then
+		return true
+	end
+
+	return targetCharacter and result.Instance and result.Instance:IsDescendantOf(targetCharacter)
+end
+
+local function canSeePlayer(state, playerRoot)
+	if not playerRoot then
+		return false
+	end
+
+	local offset = playerRoot.Position - state.lookPart.Position
+	local distance = offset.Magnitude
+	if distance &lt;= 0 or distance &gt; state.visionRange then
+		return false
+	end
+
+	local direction = offset.Unit
+	if state.lookPart.CFrame.LookVector:Dot(direction) &lt; state.visionDot then
+		return false
+	end
+
+	return hasLineOfSight(state.lookPart.Position, playerRoot.Position, playerRoot.Parent)
+end
+
+local function canTrackPlayer(state, playerRoot)
+	if not playerRoot then
+		return false
+	end
+
+	local distance = (playerRoot.Position - state.lookPart.Position).Magnitude
+	if distance &gt; state.visionRange then
+		return false
+	end
+
+	local yaw = getYawToTarget(state.rotationBaseCFrame, playerRoot.Position)
+	if math.abs(yaw) &gt; state.sweepAngle then
+		return false
+	end
+
+	return hasLineOfSight(state.lookPart.Position, playerRoot.Position, playerRoot.Parent)
+end
+
+local function findNearestVisiblePlayer(state)
+	local bestPlayer = nil
+	local bestRoot = nil
+	local bestDistance = state.visionRange + 1
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local _, root = getCharacterRoot(player)
+		if root and canSeePlayer(state, root) then
+			local distance = (root.Position - state.lookPart.Position).Magnitude
+			if distance &lt; bestDistance then
+				bestDistance = distance
+				bestPlayer = player
+				bestRoot = root
+			end
+		end
+	end
+
+	return bestPlayer, bestRoot
+end
+
+local function collectMovingParts(model)
+	local base = model:FindFirstChild("Base", true)
+	if not base or not base:IsA("BasePart") then
+		warn("[CCTV] Missing Base part in", model:GetFullName())
+		return nil
+	end
+
+	local lens = model:FindFirstChild("Lens", true)
+	if not lens or not lens:IsA("BasePart") then
+		warn("[CCTV] Missing Lens part in", model:GetFullName())
+		return nil
+	end
+
+	local movingParts = { base, lens }
+	return base, lens, movingParts
+end
+
+local function buildRelativeOffsets(basePart, parts)
+	local offsets = {}
+
+	for _, part in ipairs(parts) do
+		offsets[part] = basePart.CFrame:ToObjectSpace(part.CFrame)
+	end
+
+	return offsets
+end
+
+local function applyYaw(state)
+	local rotatedBase = state.rotationBaseCFrame * CFrame.Angles(0, state.currentYaw, 0)
+
+	for _, part in ipairs(state.movingParts) do
+		if part and part.Parent then
+			part.CFrame = rotatedBase * state.relativeOffsets[part]
+		end
+	end
+end
+
+local function buildCameraState(model)
+	local basePart, lens, movingParts = collectMovingParts(model)
+	if not basePart or not lens or not movingParts then
+		return nil
+	end
+
+	local rotationBaseCFrame = basePart.CFrame
+	local relativeOffsets = buildRelativeOffsets(basePart, movingParts)
+	local billboard, label = createIndicator(lens)
+
+	return {
+		model = model,
+		basePart = basePart,
+		lookPart = lens,
+		movingParts = movingParts,
+		relativeOffsets = relativeOffsets,
+		rotationBaseCFrame = rotationBaseCFrame,
+		currentYaw = 0,
+		sweepDirection = 1,
+		targetPlayer = nil,
+		nextSuspicionTick = 0,
+
+		sweepAngle = math.rad(getNumberAttribute(model, "SweepAngle", DEFAULT_SWEEP_ANGLE)),
+		sweepSpeed = math.rad(getNumberAttribute(model, "SweepSpeed", DEFAULT_SWEEP_SPEED)),
+		trackSpeed = math.rad(getNumberAttribute(model, "TrackSpeed", DEFAULT_TRACK_SPEED)),
+		visionRange = getNumberAttribute(model, "VisionRange", DEFAULT_VISION_RANGE),
+		visionDot = math.cos(math.rad(getNumberAttribute(model, "VisionAngle", DEFAULT_VISION_ANGLE))),
+
+		billboard = billboard,
+		label = label,
+	}
+end
+
+local function updateSweep(state, dt)
+	state.currentYaw += state.sweepDirection * state.sweepSpeed * dt
+
+	if state.currentYaw &gt;= state.sweepAngle then
+		state.currentYaw = state.sweepAngle
+		state.sweepDirection = -1
+	elseif state.currentYaw &lt;= -state.sweepAngle then
+		state.currentYaw = -state.sweepAngle
+		state.sweepDirection = 1
+	end
+
+	applyYaw(state)
+	updateIndicator(state, nil)
+end
+
+local function updateTracking(state, now, dt)
+	local _, root, humanoid = getCharacterRoot(state.targetPlayer)
+
+	if not root or not safeAlive(humanoid) or not canTrackPlayer(state, root) then
+		state.targetPlayer = nil
+		updateIndicator(state, nil)
+		return false
+	end
+
+	local targetYaw = math.clamp(
+		getYawToTarget(state.rotationBaseCFrame, root.Position),
+		-state.sweepAngle,
+		state.sweepAngle
+	)
+
+	state.currentYaw = moveTowardAngle(state.currentYaw, targetYaw, state.trackSpeed * dt)
+	applyYaw(state)
+
+	if canSeePlayer(state, root) and now &gt;= state.nextSuspicionTick then
+		addPendingSuspicion(state.targetPlayer, SUSPICION_PER_TICK)
+		state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+	end
+
+	updateIndicator(state, state.targetPlayer)
+	return true
+end
+
+local cameraStates = {}
+
+for _, model in ipairs(getAllCameraModels()) do
+	local state = buildCameraState(model)
+	if state then
+		table.insert(cameraStates, state)
+	end
+end
+
+if #cameraStates == 0 then
+	warn("[CCTV] No valid camera models were found in Workspace.")
+	return
+end
+
+local lastTime = os.clock()
+
+while true do
+	task.wait(UPDATE_RATE)
+
+	local now = os.clock()
+	local dt = math.max(now - lastTime, 0)
+	lastTime = now
+
+	for _, state in ipairs(cameraStates) do
+		if not updateTracking(state, now, dt) then
+			updateSweep(state, dt)
+
+			local player, root = findNearestVisiblePlayer(state)
+			if player and root then
+				state.targetPlayer = player
+
+				local targetYaw = math.clamp(
+					getYawToTarget(state.rotationBaseCFrame, root.Position),
+					-state.sweepAngle,
+					state.sweepAngle
+				)
+
+				state.currentYaw = moveTowardAngle(state.currentYaw, targetYaw, state.trackSpeed * dt)
+				applyYaw(state)
+
+				if now &gt;= state.nextSuspicionTick and canSeePlayer(state, root) then
+					addPendingSuspicion(player, SUSPICION_PER_TICK)
+					state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+				end
+
+				updateIndicator(state, player)
+			end
+		end
+	end
+end</string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="32">
+        <Properties>
+          <string name="Name">DoorScript</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+-- Reference the main model
+local mainModel = workspace:WaitForChild("S.S.R. Teknikk Door")
+local doorLeft = mainModel:WaitForChild("DoorLeft")
+local doorRight = mainModel:WaitForChild("DoorRight")
+
+-- Configuration
+local openDistance = 15 -- Increased so it opens BEFORE you reach it
+local slideAmount = 9.5    -- Increased so you can fit through easily
+local tweenSpeed = 0.6  -- Lower is faster (0.6s to open/close)
+local tweenInfo = TweenInfo.new(tweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+-- Store original Pivot CFrames
+local leftClosedPivot = doorLeft:GetPivot()
+local rightClosedPivot = doorRight:GetPivot()
+
+-- Calculate open Pivot CFrames (Adjust axis if doors move wrong way)
+local leftOpenPivot = leftClosedPivot * CFrame.new(-slideAmount, 0, 0)
+local rightOpenPivot = rightClosedPivot * CFrame.new(slideAmount, 0, 0)
+
+local isOpen = false
+local isAnimating = false
+
+-- Improved Animation Function
+local function animateDoors(shouldOpen)
+	isAnimating = true
+	
+	local startLeft = doorLeft:GetPivot()
+	local startRight = doorRight:GetPivot()
+	
+	local targetLeft = shouldOpen and leftOpenPivot or leftClosedPivot
+	local targetRight = shouldOpen and rightOpenPivot or rightClosedPivot
+	
+	local val = Instance.new("NumberValue")
+	val.Value = 0
+	
+	local connection
+	connection = val:GetPropertyChangedSignal("Value"):Connect(function()
+		doorLeft:PivotTo(startLeft:Lerp(targetLeft, val.Value))
+		doorRight:PivotTo(startRight:Lerp(targetRight, val.Value))
+	end)
+	
+	local tween = TweenService:Create(val, tweenInfo, {Value = 1})
+	tween:Play()
+	
+	tween.Completed:Connect(function()
+		connection:Disconnect()
+		val:Destroy()
+		isAnimating = false
+	end)
+end
+
+-- Detection Loop
+while task.wait(0.2) do
+	local playerNear = false
+	for _, player in pairs(Players:GetPlayers()) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local distance = (char.HumanoidRootPart.Position - leftClosedPivot.Position).Magnitude
+			if distance <= openDistance then
+				playerNear = true
+				break
+			end
+		end
+	end
+
+	if playerNear and not isOpen and not isAnimating then
+		isOpen = true
+		animateDoors(true)
+	elseif not playerNear and isOpen and not isAnimating then
+		isOpen = false
+		animateDoors(false)
+	end
+end
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="33">
+        <Properties>
+          <string name="Name">InGuard</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[-- GuardInside (Patrol + Advanced Chase + Search + Batched Suspicion)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+
+local GUARD = Workspace:WaitForChild("GuardInside")
+local RIG = GUARD:WaitForChild("Rig")
+local HUMANOID = RIG:WaitForChild("Humanoid")
+local HRP = RIG:WaitForChild("HumanoidRootPart")
+
+-- === INDOOR SETTINGS ===
+local PATROL_SPEED = 8
+local CHASE_SPEED = 14
+local VISION_RANGE = 35  -- Shorter range for indoors
+local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
+local CHASE_TIMEOUT = 3
+
+-- Suspicion tuning (Inside)
+local SUSPICION_PER_TICK = 2     -- matches camera suspicion rate
+local SUSPICION_TICK_RATE = 0.25 -- matches camera suspicion cadence
+
+-- === SUSPICION THROTTLE/BATCH ===
+local SUSPICION_PUSH_INTERVAL = 0.5 
+local pendingSuspicion = {}         
+
+local function queueSuspicion(player, amount)
+	if not player or not player.UserId then return end
+	local uid = player.UserId
+	pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+end
+
+local function flushSuspicion(player)
+	if not player or not player.UserId then return end
+	local uid = player.UserId
+	local delta = pendingSuspicion[uid] or 0
+	if delta > 0 then
+		SuspicionManager.Add(delta, player) -- BUG FIXED: Added player argument
+		pendingSuspicion[uid] = 0
+	end
+end
+
+-- background flusher
+task.spawn(function()
+	while task.wait(SUSPICION_PUSH_INTERVAL) do
+		for uid, delta in pairs(pendingSuspicion) do
+			if delta and delta > 0 then
+				local ply = Players:GetPlayerByUserId(uid)
+				if ply then
+					SuspicionManager.Add(delta, ply)
+				end
+				pendingSuspicion[uid] = 0
+			end
+		end
+	end
+end)
+
+-- === WALK ANIMATION ===
+local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848"
+local Animator = HUMANOID:FindFirstChildOfClass("Animator") or Instance.new("Animator", HUMANOID)
+local WalkTrack do
+	local anim = Instance.new("Animation")
+	anim.AnimationId = WALK_ANIM_ID
+	WalkTrack = Animator:LoadAnimation(anim)
+end
+
+local function playWalk()
+	if WalkTrack and not WalkTrack.IsPlaying then WalkTrack:Play() end
+end
+local function stopWalk()
+	if WalkTrack and WalkTrack.IsPlaying then WalkTrack:Stop() end
+end
+
+-- === PATROL POINTS ===
+local PatrolFolder = RIG:FindFirstChild("PatrolPoints") or GUARD:FindFirstChild("PatrolPoints")
+local Waypoints = {}
+if PatrolFolder then
+	for _, part in ipairs(PatrolFolder:GetChildren()) do
+		if part:IsA("BasePart") then table.insert(Waypoints, part) end
+	end
+	table.sort(Waypoints, function(a,b)
+		local na = tonumber(a.Name:match("%d+")) or math.huge
+		local nb = tonumber(b.Name:match("%d+")) or math.huge
+		return na < nb
+	end)
+end
+local currentPoint = 1
+
+-- === HELPERS ===
+local function safeAlive(h) return h and h.Health > 0 and h.Parent end
+
+local function canSeePlayer(playerHRP)
+	if not HRP or not playerHRP then return false end
+
+	-- BUG FIXED: Lifted eyes up 1.5 studs
+	local eyePosition = HRP.Position + Vector3.new(0, 1.5, 0)
+	local targetPosition = playerHRP.Position + Vector3.new(0, 1.5, 0)
+
+	local diff = targetPosition - eyePosition
+	local dist = diff.Magnitude
+	if dist > VISION_RANGE then return false end
+	local dir = diff.Unit
+	if HRP.CFrame.LookVector:Dot(dir) < VISION_ANGLE then return false end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Blacklist
+	params.FilterDescendantsInstances = {GUARD}
+	local ray = Workspace:Raycast(eyePosition, dir * dist, params)
+
+	if not ray then return true end
+	local hitModel = ray.Instance and ray.Instance:FindFirstAncestorOfClass("Model")
+	return hitModel and hitModel == playerHRP.Parent
+end
+
+local function findTarget()
+	local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hrp and safeAlive(hum) then
+			local dist = (hrp.Position - HRP.Position).Magnitude
+			if dist < minDist and canSeePlayer(hrp) then
+				minDist = dist
+				nearestPlayer = player
+				nearestHRP = hrp
+			end
+		end
+	end
+	return nearestPlayer, nearestHRP
+end
+
+-- === MAIN BEHAVIOR ===
+local function patrol()
+	while task.wait(0.2) do
+		-- Look for players
+		local nearestPlayer, nearestHRP = findTarget()
+
+		-- Chase logic (advanced chase + search)
+		if nearestPlayer and nearestHRP then
+			HUMANOID.WalkSpeed = CHASE_SPEED
+			playWalk()
+			local chaseStartTime = os.clock()
+			local lastSeenPos = nearestHRP.Position
+
+			while os.clock() - chaseStartTime < CHASE_TIMEOUT do
+				local char = nearestPlayer.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if not char or not safeAlive(hum) then break end
+
+				if canSeePlayer(nearestHRP) then
+					queueSuspicion(nearestPlayer, SUSPICION_PER_TICK)
+					lastSeenPos = nearestHRP.Position
+					HUMANOID:MoveTo(nearestHRP.Position)
+				else
+					-- Search: go to last seen position, then "look around"
+					HUMANOID:MoveTo(lastSeenPos)
+					task.wait(0.4)
+
+					local searchStart = os.clock()
+					while os.clock() - searchStart < 2.5 and os.clock() - chaseStartTime < CHASE_TIMEOUT do
+						-- rotate/scan
+						if HRP then
+							HRP.CFrame = HRP.CFrame * CFrame.Angles(0, math.rad(35), 0)
+						end
+						if canSeePlayer(nearestHRP) then
+							lastSeenPos = nearestHRP.Position
+							break
+						end
+						task.wait(0.15)
+					end
+
+					if not canSeePlayer(nearestHRP) then
+						break
+					end
+				end
+
+				task.wait(SUSPICION_TICK_RATE)
+			end
+
+			-- flush any remaining suspicion for responsiveness
+			flushSuspicion(nearestPlayer)
+
+			stopWalk()
+			HUMANOID.WalkSpeed = PATROL_SPEED
+		end
+
+		-- Patrol between points (BUG FIXED: Active vision while walking)
+		if not nearestPlayer and #Waypoints > 0 then
+			local point = Waypoints[currentPoint]
+			if point then
+				HUMANOID.WalkSpeed = PATROL_SPEED
+				playWalk()
+				HUMANOID:MoveTo(point.Position)
+
+				local startMoveTime = os.clock()
+				while (HRP.Position - point.Position).Magnitude > 4 do
+					if os.clock() - startMoveTime > 8 then break end
+
+					nearestPlayer, nearestHRP = findTarget()
+					if nearestPlayer then break end
+					task.wait(0.2)
+				end
+
+				if not nearestPlayer then
+					stopWalk()
+					currentPoint = (currentPoint % #Waypoints) + 1
+					task.wait(1)
+				end
+			end
+		end
+	end
+end
+
+task.spawn(patrol)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="34">
+        <Properties>
+          <string name="Name">KeycardCopier</string>
+          <string name="Source">local KeycardCopier = {}
+
+local function hasOwnedKeycard(player, tool)
+	if player == nil or tool == nil then
+		return false
+	end
+
+	if tool:IsA("Tool") ~= true then
+		return false
+	end
+
+	local ownerValue = tool:FindFirstChild("OwnerUserId")
+	if ownerValue == nil or ownerValue:IsA("IntValue") ~= true then
+		return false
+	end
+
+	return ownerValue.Value == player.UserId
+end
+
+function KeycardCopier.canUnlock(player, tool)
+	return hasOwnedKeycard(player, tool)
+end
+
+function KeycardCopier.tryUnlock(player, tool, unlockCallback)
+	if KeycardCopier.canUnlock(player, tool) then
+		if typeof(unlockCallback) == "function" then
+			unlockCallback()
+		end
+		return true
+	end
+
+	return false
+end
+
+return KeycardCopier</string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="35">
+        <Properties>
+          <string name="Name">KeycardCopier</string>
+          <token name="RunContext">0</token>
+          <string name="Source">local KeycardCopier = require(script.Parent.KeycardCopier)
+
+-- Example hookup
+-- local prompt = workspace.SomeDoor.ProximityPrompt
+-- local remoteOrDoorLogic = ...
+
+-- prompt.Triggered:Connect(function(player)
+-- 	local character = player.Character
+-- 	local tool = character and character:FindFirstChildOfClass("Tool")
+--
+-- 	KeycardCopier.tryUnlock(player, tool, function()
+-- 		-- fire door unlock event here
+-- 	end)
+-- end)</string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="36">
+        <Properties>
+          <string name="Name">MissionController</string>
+          <string name="Source"><![CDATA[local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ObjectiveManager = require(ReplicatedStorage:WaitForChild("ObjectiveManager"))
+
+-- This is our master list of tasks for Sprint 1
+local defaultMission = {
+	{ id = "task1", text = "Infiltrate the outer perimeter.", status = "In Progress" },
+	{ id = "task2", text = "Copy the Guard's Key Code.", status = "Not Started" },
+	{ id = "task3", text = "Unlock the sliding door.", status = "Not Started" }
+}
+
+-- Give the player the mission when they join
+Players.PlayerAdded:Connect(function(player)
+	-- Wait a brief moment for their UI to load
+	task.wait(2)
+	ObjectiveManager.SetPlayerObjectives(player, defaultMission)
+end)
+
+-- Example: How you will mark a task as complete later!
+-- You can call a function like this from your Ghost Key script when the time comes.
+local function completeTaskTwo(player)
+	defaultMission[2].status = "Completed"
+	defaultMission[3].status = "In Progress"
+	ObjectiveManager.SetPlayerObjectives(player, defaultMission)
+end
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="37">
+        <Properties>
+          <string name="Name">NarrativeManager</string>
+          <token name="RunContext">0</token>
+          <string name="Source">local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local NarrativeManager = require(Shared:WaitForChild("NarrativeManager"))
+local IntegrityService = require(Shared:WaitForChild("IntegrityService"))
+
+local remotesFolder = ReplicatedStorage:FindFirstChild("NarrativeRemotes")
+if not remotesFolder then
+	remotesFolder = Instance.new("Folder")
+	remotesFolder.Name = "NarrativeRemotes"
+	remotesFolder.Parent = ReplicatedStorage
+end
+
+local startDialogueEvent = remotesFolder:FindFirstChild("StartDialogue")
+if not startDialogueEvent then
+	startDialogueEvent = Instance.new("RemoteEvent")
+	startDialogueEvent.Name = "StartDialogue"
+	startDialogueEvent.Parent = remotesFolder
+end
+
+local chooseOptionEvent = remotesFolder:FindFirstChild("ChooseOption")
+if not chooseOptionEvent then
+	chooseOptionEvent = Instance.new("RemoteEvent")
+	chooseOptionEvent.Name = "ChooseOption"
+	chooseOptionEvent.Parent = remotesFolder
+end
+
+local dialogueUpdateEvent = remotesFolder:FindFirstChild("DialogueUpdate")
+if not dialogueUpdateEvent then
+	dialogueUpdateEvent = Instance.new("RemoteEvent")
+	dialogueUpdateEvent.Name = "DialogueUpdate"
+	dialogueUpdateEvent.Parent = remotesFolder
+end
+
+local function sendError(player, message)
+	dialogueUpdateEvent:FireClient(player, {
+		error = message,
+	})
+end
+
+startDialogueEvent.OnServerEvent:Connect(function(player, dialogueId)
+	local nodeData, err = NarrativeManager.startDialogue(player, dialogueId)
+	if not nodeData then
+		sendError(player, err or "Failed to start dialogue")
+		return
+	end
+
+	dialogueUpdateEvent:FireClient(player, nodeData)
+end)
+
+chooseOptionEvent.OnServerEvent:Connect(function(player, choiceIndex)
+	local nodeData, err = NarrativeManager.chooseOption(player, choiceIndex)
+	if not nodeData then
+		sendError(player, err or "Failed to process choice")
+		return
+	end
+
+	dialogueUpdateEvent:FireClient(player, nodeData)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	NarrativeManager.endDialogue(player)
+	IntegrityService.resetIntegrity(player)
+end)</string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="38">
+        <Properties>
+          <string name="Name">OutGuard</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[-- GuardOutside (Patrol + Basic Chase + Batched Suspicion)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+
+local GUARD = Workspace:WaitForChild("GuardOutside")
+local RIG = GUARD:WaitForChild("Rig")
+local HUMANOID = RIG:WaitForChild("Humanoid")
+local HRP = RIG:WaitForChild("HumanoidRootPart")
+
+-- === SETTINGS ===
+local PATROL_SPEED = 8
+local CHASE_SPEED = 13
+local VISION_RANGE = 60
+local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
+local CHASE_TIMEOUT = 3 -- seconds before giving up
+
+-- Suspicion tuning (Outside)
+local SUSPICION_PER_TICK = 2      -- matches camera suspicion rate
+local SUSPICION_TICK_RATE = 0.25  -- matches camera suspicion cadence
+
+-- === SUSPICION THROTTLE/BATCH ===
+local SUSPICION_PUSH_INTERVAL = 0.5 -- send at most 2x/sec
+local pendingSuspicion = {}         -- [userId] = accumulated delta
+
+local function queueSuspicion(player, amount)
+	if not player or not player.UserId then return end
+	local uid = player.UserId
+	pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+end
+
+local function flushSuspicion(player)
+	if not player or not player.UserId then return end
+	local uid = player.UserId
+	local delta = pendingSuspicion[uid] or 0
+	if delta > 0 then
+		SuspicionManager.Add(delta, player)
+		pendingSuspicion[uid] = 0
+	end
+end
+
+-- background flusher (flush all pending every interval)
+task.spawn(function()
+	while task.wait(SUSPICION_PUSH_INTERVAL) do
+		for uid, delta in pairs(pendingSuspicion) do
+			if delta and delta > 0 then
+				local ply = Players:GetPlayerByUserId(uid)
+				if ply then
+					SuspicionManager.Add(delta, ply)
+				end
+				pendingSuspicion[uid] = 0
+			end
+		end
+	end
+end)
+
+-- === WALK ANIMATION ===
+local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848"
+local Animator = HUMANOID:FindFirstChildOfClass("Animator") or Instance.new("Animator", HUMANOID)
+local WalkTrack do
+	local anim = Instance.new("Animation")
+	anim.AnimationId = WALK_ANIM_ID
+	WalkTrack = Animator:LoadAnimation(anim)
+end
+
+local function playWalk()
+	if WalkTrack and not WalkTrack.IsPlaying then WalkTrack:Play() end
+end
+local function stopWalk()
+	if WalkTrack and WalkTrack.IsPlaying then WalkTrack:Stop() end
+end
+
+-- === PATROL POINTS ===
+local PatrolFolder = RIG:FindFirstChild("PatrolPoints") or GUARD:FindFirstChild("PatrolPoints")
+local Waypoints = {}
+if PatrolFolder then
+	for _, part in ipairs(PatrolFolder:GetChildren()) do
+		if part:IsA("BasePart") then table.insert(Waypoints, part) end
+	end
+	table.sort(Waypoints, function(a,b)
+		local na = tonumber(a.Name:match("%d+")) or math.huge
+		local nb = tonumber(b.Name:match("%d+")) or math.huge
+		return na < nb
+	end)
+end
+local currentPoint = 1
+
+-- === HELPERS ===
+local function safeAlive(h) return h and h.Health > 0 and h.Parent end
+
+local function canSeePlayer(playerHRP)
+	if not HRP or not playerHRP then return false end
+
+	-- Lift the "eyes" up slightly so the ray doesn't scrape the floor/small bumps
+	local eyePosition = HRP.Position + Vector3.new(0, 1.5, 0)
+	local targetPosition = playerHRP.Position + Vector3.new(0, 1.5, 0)
+
+	local diff = targetPosition - eyePosition
+	local dist = diff.Magnitude
+	if dist > VISION_RANGE then return false end
+
+	local dir = diff.Unit
+	if HRP.CFrame.LookVector:Dot(dir) < VISION_ANGLE then return false end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Blacklist
+	params.FilterDescendantsInstances = {GUARD}
+	local ray = Workspace:Raycast(eyePosition, dir * dist, params)
+
+	if not ray then return true end
+	local hitModel = ray.Instance and ray.Instance:FindFirstAncestorOfClass("Model")
+	return hitModel and hitModel == playerHRP.Parent
+end
+
+local function findTarget()
+	local nearestPlayer, nearestHRP, minDist = nil, nil, VISION_RANGE + 1
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if hrp and safeAlive(hum) then
+			local dist = (hrp.Position - HRP.Position).Magnitude
+			if dist < minDist and canSeePlayer(hrp) then
+				minDist = dist
+				nearestPlayer = player
+				nearestHRP = hrp
+			end
+		end
+	end
+	return nearestPlayer, nearestHRP
+end
+
+-- === MAIN BEHAVIOR ===
+local function patrol()
+	while task.wait(0.2) do
+		-- 1. Check for players
+		local nearestPlayer, nearestHRP = findTarget()
+
+		-- 2. If no player is seen, do patrol movement
+		if not nearestPlayer and #Waypoints > 0 then
+			local point = Waypoints[currentPoint]
+			if point then
+				HUMANOID.WalkSpeed = PATROL_SPEED
+				playWalk()
+				HUMANOID:MoveTo(point.Position)
+
+				-- Look for players WHILE walking instead of waiting blindly
+				local startMoveTime = os.clock()
+				while (HRP.Position - point.Position).Magnitude > 4 do
+					-- Safety timeout in case the guard gets stuck on a wall
+					if os.clock() - startMoveTime > 8 then break end
+
+					-- Check vision every 0.2 seconds while walking
+					nearestPlayer, nearestHRP = findTarget()
+					if nearestPlayer then 
+						break -- Spotted someone! Break out of the walking loop!
+					end
+					task.wait(0.2)
+				end
+
+				-- Only wait at the waypoint if we didn't just spot someone
+				if not nearestPlayer then
+					stopWalk()
+					currentPoint = (currentPoint % #Waypoints) + 1
+					task.wait(1)
+				end
+			end
+		end
+
+		-- 3. Chase logic (fixed chase window)
+		if nearestPlayer and nearestHRP then
+			HUMANOID.WalkSpeed = CHASE_SPEED
+			playWalk()
+			local chaseStartTime = os.clock()
+
+			while os.clock() - chaseStartTime < CHASE_TIMEOUT do
+				local char = nearestPlayer.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if not char or not safeAlive(hum) then break end
+
+				if canSeePlayer(nearestHRP) then
+					queueSuspicion(nearestPlayer, SUSPICION_PER_TICK)
+				end
+
+				HUMANOID:MoveTo(nearestHRP.Position)
+				task.wait(SUSPICION_TICK_RATE)
+			end
+
+			-- flush any remaining suspicion
+			flushSuspicion(nearestPlayer)
+
+			stopWalk()
+			HUMANOID.WalkSpeed = PATROL_SPEED
+		end
+	end
+end
+
+task.spawn(patrol)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="39">
+        <Properties>
+          <string name="Name">Sound</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[
+local soundtrack = Instance.new("Sound")
+
+soundtrack.Name = "BackgroundMusic"
+soundtrack.SoundId = "rbxassetid://71678085536375"
+soundtrack.Volume = 0.35
+soundtrack.Looped = true
+soundtrack.Parent = game.Workspace
+
+soundtrack:Play()
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="40">
+        <Properties>
+          <string name="Name">TVScript</string>
+          <token name="RunContext">0</token>
+          <string name="Source">local tv = script.Parent
+local clickDetector = tv:WaitForChild("ClickDetector")
+
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local openEvent = replicatedStorage:WaitForChild("OpenCameraMonitor")
+
+clickDetector.MouseClick:Connect(function(player)
+	openEvent:FireClient(player)
+end)</string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="41">
+        <Properties>
+          <string name="Name">hello</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[print("Hello world, from server!")
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="SoundService" referent="42">
+    <Properties>
+      <string name="Name">SoundService</string>
+      <bool name="RespectFilteringEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="StarterPlayer" referent="43">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="44">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="45">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[local controller = script.Parent:WaitForChild("SuspicionController")
+require(controller).init()
+]]></string>
+        </Properties>
+        <Item class="LocalScript" referent="46">
+          <Properties>
+            <string name="Name">NarrativeClient</string>
+            <string name="Source">local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local remotesFolder = ReplicatedStorage:WaitForChild("NarrativeRemotes")
+local startDialogueEvent = remotesFolder:WaitForChild("StartDialogue")
+local chooseOptionEvent = remotesFolder:WaitForChild("ChooseOption")
+local dialogueUpdateEvent = remotesFolder:WaitForChild("DialogueUpdate")
+
+local function displayNode(nodeData)
+	if nodeData.error then
+		warn("Narrative error:", nodeData.error)
+		return
+	end
+
+	print("----- DIALOGUE UPDATE -----")
+	print("Node:", nodeData.nodeId or "none")
+	print("Text:", nodeData.text or "none")
+	print("Integrity:", nodeData.integrity or 0)
+
+	if nodeData.choices and #nodeData.choices &gt; 0 then
+		for index, choice in ipairs(nodeData.choices) do
+			print(index .. ". " .. choice.text)
+		end
+	else
+		print("No choices available.")
+	end
+
+	if nodeData.isEnd then
+		print("Dialogue ended.")
+	end
+end
+
+dialogueUpdateEvent.OnClientEvent:Connect(displayNode)
+
+-- Example starter call for testing
+task.wait(3)
+startDialogueEvent:FireServer("Intro")
+
+-- For temporary testing in output:
+-- After the dialogue starts, you can manually uncomment one of these.
+-- task.wait(5)
+-- chooseOptionEvent:FireServer(1)
+
+-- task.wait(8)
+-- chooseOptionEvent:FireServer(2)</string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="47">
+          <Properties>
+            <string name="Name">PlayerMech</string>
+            <string name="Source">local player = game.Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local humanoid
+local animate
+local crouching = false
+
+local function setupCharacter(character)
+    humanoid = character:WaitForChild("Humanoid")
+end
+
+if player.Character then
+    setupCharacter(player.Character)
+end
+
+player.CharacterAdded:Connect(setupCharacter)
+
+-- Crouch when holding LeftShift
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        crouching = true
+        humanoid.WalkSpeed = 6
+
+        local animation = Instance.new("Animation")
+        animation.AnimationId = "rbxassetid://89110259028624"
+
+        animate = humanoid:LoadAnimation(animation)
+        animate:Play()
+    end
+end)
+
+-- Stop crouch when releasing LeftShift
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftShift then
+        crouching = false
+        humanoid.WalkSpeed = 16
+
+        if animate then
+            animate:Stop()
+        end
+    end
+end)
+
+-- Stop animation when not moving
+RunService.RenderStepped:Connect(function()
+    if crouching and humanoid then
+        if humanoid.MoveDirection.Magnitude &lt; 0.1 then
+            if animate and animate.IsPlaying then
+                animate:Stop()
+            end
+        else
+            if animate and not animate.IsPlaying then
+                animate:Play()
+            end
+        end
+    end
+end)</string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="48">
+          <Properties>
+            <string name="Name">SuspicionController</string>
+            <string name="Source"><![CDATA[local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+
+local SuspicionController = {}
+
+local COLORS = {
+	SAFE = Color3.fromRGB(0, 255, 150),
+	CAUTION = Color3.fromRGB(255, 200, 0),
+	DANGER = Color3.fromRGB(255, 50, 50),
+}
+
+local initialized = false
+local uiRefs
+
+local function getUiRefs()
+	if uiRefs and uiRefs.fillBar and uiRefs.fillBar.Parent then
+		return uiRefs
+	end
+
+	local background = playerGui:FindFirstChild("BackgroundBar", true)
+	if not background then
+		return nil
+	end
+
+	local fillBar = background:FindFirstChild("FillBar", true)
+	local titleLabel = background:FindFirstChild("TitleLabel", true)
+	if not fillBar or not titleLabel then
+		return nil
+	end
+
+	local screenGui = background:FindFirstAncestorOfClass("ScreenGui")
+	local neonGlow = screenGui and screenGui:FindFirstChild("NeonGlow", true)
+	local glowStroke = neonGlow and neonGlow:FindFirstChild("UIStroke", true)
+	local uiGradient = glowStroke and glowStroke:FindFirstChild("UIGradient", true)
+
+	uiRefs = {
+		fillBar = fillBar,
+		titleLabel = titleLabel,
+		neonGlow = neonGlow,
+		glowStroke = glowStroke,
+		uiGradient = uiGradient,
+	}
+
+	return uiRefs
+end
+
+local function waitForUiRefs(timeoutSeconds)
+	local deadline = os.clock() + timeoutSeconds
+	local refs = getUiRefs()
+
+	while not refs and os.clock() < deadline do
+		task.wait(0.1)
+		refs = getUiRefs()
+	end
+
+	return refs
+end
+
+local function updateUi(newValue)
+	local refs = getUiRefs()
+	if not refs then
+		return
+	end
+
+	local percent = math.clamp(newValue / 100, 0, 1)
+	local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	TweenService:Create(refs.fillBar, tweenInfo, { Size = UDim2.new(percent, 0, 1, 0) }):Play()
+
+	local targetColor
+	if percent > 0.8 then
+		targetColor = COLORS.DANGER
+		refs.titleLabel.Text = "!! EXPOSED !!"
+	elseif percent > 0.4 then
+		targetColor = COLORS.CAUTION
+		refs.titleLabel.Text = "SUSPICION: HIGH"
+	else
+		targetColor = COLORS.SAFE
+		refs.titleLabel.Text = "SUSPICION: CLEAR"
+	end
+
+	refs.fillBar.BackgroundColor3 = targetColor
+	refs.titleLabel.TextColor3 = targetColor
+
+	if refs.neonGlow then
+		refs.neonGlow.Visible = true
+		refs.neonGlow.BackgroundTransparency = 1
+	end
+
+	if refs.glowStroke then
+		refs.glowStroke.Color = targetColor
+	end
+
+	if refs.uiGradient then
+		refs.uiGradient.Color = ColorSequence.new(targetColor)
+	end
+end
+
+local function startDecayLoop()
+	task.spawn(function()
+		while true do
+			task.wait(1)
+
+			if SuspicionManager.Get() > 0 then
+				SuspicionManager.Reduce(1)
+			end
+		end
+	end)
+end
+
+function SuspicionController.init()
+	if initialized then
+		return SuspicionController
+	end
+
+	initialized = true
+
+	if not waitForUiRefs(10) then
+		warn("[SuspicionController] Suspicion UI was not found in PlayerGui.")
+	end
+
+	SuspicionManager.Changed:Connect(updateUi)
+	updateUi(SuspicionManager.Get())
+	startDecayLoop()
+
+	return SuspicionController
+end
+
+return SuspicionController
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="49">
+          <Properties>
+            <string name="Name">camscreen</string>
+            <string name="Source">local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local gameCamera = workspace.CurrentCamera
+
+local openEvent = ReplicatedStorage:WaitForChild("OpenCameraMonitor")
+
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+local monitorOpen = false
+local currentIndex = 1
+local renderConnection = nil
+
+local cameraPoints = {}
+
+local screenGui
+local mainFrame
+local titleLabel
+local leftButton
+local rightButton
+local closeButton
+
+local function refreshCharacter(newCharacter)
+	character = newCharacter or player.Character or player.CharacterAdded:Wait()
+	humanoid = character:WaitForChild("Humanoid")
+
+	if not monitorOpen then
+		gameCamera.CameraSubject = humanoid
+	end
+end
+
+player.CharacterAdded:Connect(refreshCharacter)
+
+local function collectCameras()
+	cameraPoints = {}
+
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("Model") and obj.Name == "Camera" then
+			local lens = obj:FindFirstChild("Lens", true)
+
+			if lens and lens:IsA("BasePart") then
+				table.insert(cameraPoints, {
+					cameraModel = obj,
+					viewPart = lens
+				})
+			else
+				warn("[Monitor] No valid Lens found in", obj:GetFullName())
+			end
+		end
+	end
+end
+
+local function updateTitle()
+	if #cameraPoints == 0 then
+		titleLabel.Text = "NO CAMERAS"
+	else
+		titleLabel.Text = "CAMERA " .. currentIndex .. " / " .. #cameraPoints
+	end
+end
+
+local function applyCurrentCamera()
+	local data = cameraPoints[currentIndex]
+	if not data or not data.viewPart or not data.viewPart.Parent then
+		return
+	end
+
+	gameCamera.CameraType = Enum.CameraType.Scriptable
+	gameCamera.CFrame = data.viewPart.CFrame
+	updateTitle()
+end
+
+local function nextCamera()
+	if #cameraPoints == 0 then
+		return
+	end
+
+	currentIndex += 1
+	if currentIndex &gt; #cameraPoints then
+		currentIndex = 1
+	end
+
+	applyCurrentCamera()
+end
+
+local function previousCamera()
+	if #cameraPoints == 0 then
+		return
+	end
+
+	currentIndex -= 1
+	if currentIndex &lt; 1 then
+		currentIndex = #cameraPoints
+	end
+
+	applyCurrentCamera()
+end
+
+local function closeMonitor()
+	monitorOpen = false
+
+	if renderConnection then
+		renderConnection:Disconnect()
+		renderConnection = nil
+	end
+
+	screenGui.Enabled = false
+	gameCamera.CameraType = Enum.CameraType.Custom
+
+	if humanoid then
+		gameCamera.CameraSubject = humanoid
+	end
+end
+
+local function openMonitor()
+	collectCameras()
+
+	if #cameraPoints == 0 then
+		warn("No cameras found. Expected a model named Camera containing a part named Lens.")
+		return
+	end
+
+	if currentIndex &gt; #cameraPoints then
+		currentIndex = 1
+	end
+
+	monitorOpen = true
+	screenGui.Enabled = true
+
+	applyCurrentCamera()
+
+	if renderConnection then
+		renderConnection:Disconnect()
+	end
+
+	renderConnection = RunService.RenderStepped:Connect(function()
+		if not monitorOpen then
+			return
+		end
+
+		local data = cameraPoints[currentIndex]
+		if data and data.viewPart and data.viewPart.Parent then
+			gameCamera.CFrame = data.viewPart.CFrame
+		end
+	end)
+end
+
+screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CameraMonitorGui"
+screenGui.ResetOnSpawn = false
+screenGui.Enabled = false
+screenGui.Parent = playerGui
+
+mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 420, 0, 110)
+mainFrame.Position = UDim2.new(0.5, -210, 1, -130)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+mainFrame.BackgroundTransparency = 0.15
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -120, 0, 40)
+titleLabel.Position = UDim2.new(0, 60, 0, 10)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "CAMERA"
+titleLabel.TextColor3 = Color3.new(1, 1, 1)
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.Parent = mainFrame
+
+leftButton = Instance.new("TextButton")
+leftButton.Size = UDim2.new(0, 80, 0, 40)
+leftButton.Position = UDim2.new(0, 10, 0, 55)
+leftButton.Text = "&lt;"
+leftButton.TextScaled = true
+leftButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+leftButton.TextColor3 = Color3.new(1, 1, 1)
+leftButton.Parent = mainFrame
+
+rightButton = Instance.new("TextButton")
+rightButton.Size = UDim2.new(0, 80, 0, 40)
+rightButton.Position = UDim2.new(1, -90, 0, 55)
+rightButton.Text = "&gt;"
+rightButton.TextScaled = true
+rightButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+rightButton.TextColor3 = Color3.new(1, 1, 1)
+rightButton.Parent = mainFrame
+
+closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 40, 0, 40)
+closeButton.Position = UDim2.new(1, -50, 0, 10)
+closeButton.Text = "X"
+closeButton.TextScaled = true
+closeButton.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+closeButton.TextColor3 = Color3.new(1, 1, 1)
+closeButton.Parent = mainFrame
+
+leftButton.MouseButton1Click:Connect(previousCamera)
+rightButton.MouseButton1Click:Connect(nextCamera)
+closeButton.MouseButton1Click:Connect(closeMonitor)
+
+openEvent.OnClientEvent:Connect(function()
+	if monitorOpen then
+		closeMonitor()
+	else
+		openMonitor()
+	end
+end)</string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="50">
+          <Properties>
+            <string name="Name">start</string>
+            <string name="Source"><![CDATA[-- FULLSCREEN AUTO-BUILT TITLE SCREEN
+-- Just drop this LocalScript into StarterPlayerScripts or StarterGui
+
+-- Rewrite this entire thing
+
+local Players = game:GetService("Players")
+local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+---------------------------------------------------------
+-- CREATE SCREEN GUI
+---------------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "TitleScreen"
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+---------------------------------------------------------
+-- HELPER: CREATE A CENTERED PANEL
+---------------------------------------------------------
+local function createPanel(name)
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.Size = UDim2.new(0.5, 0, 0.55, 0)
+	frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+	frame.BackgroundTransparency = 0.1
+	frame.Visible = false
+	frame.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 16)
+	corner.Parent = frame
+
+	return frame
+end
+
+---------------------------------------------------------
+-- MAIN MENU PANEL
+---------------------------------------------------------
+local mainFrame = createPanel("MainFrame")
+mainFrame.Visible = true
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 70)
+title.Position = UDim2.new(0, 0, 0, 10)
+title.BackgroundTransparency = 1
+title.Text = "Undercover: Data Compromised"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
+
+local buttonHolder = Instance.new("Frame")
+buttonHolder.Size = UDim2.new(1, -40, 0, 160)
+buttonHolder.Position = UDim2.new(0.5, 0, 0.45, 0)
+buttonHolder.AnchorPoint = Vector2.new(0.5, 0)
+buttonHolder.BackgroundTransparency = 1
+buttonHolder.Parent = mainFrame
+
+local list = Instance.new("UIListLayout")
+list.Padding = UDim.new(0, 10)
+list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+list.Parent = buttonHolder
+
+local function makeButton(text)
+	local button = Instance.new("TextButton")
+	button.Size = UDim2.new(1, 0, 0, 45)
+	button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	button.Text = text
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.TextScaled = true
+	button.Font = Enum.Font.GothamSemibold
+	button.Parent = buttonHolder
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = button
+
+	return button
+end
+
+local startButton   = makeButton("Start Mission")
+local settingsButton = makeButton("Settings")
+local helpButton    = makeButton("Help")
+
+---------------------------------------------------------
+-- SETTINGS PANEL
+---------------------------------------------------------
+local settingsFrame = createPanel("SettingsFrame")
+
+local stitle = Instance.new("TextLabel")
+stitle.Size = UDim2.new(1, 0, 0, 50)
+stitle.Position = UDim2.new(0, 0, 0, 10)
+stitle.BackgroundTransparency = 1
+stitle.Text = "Settings"
+stitle.TextColor3 = Color3.new(1, 1, 1)
+stitle.TextScaled = true
+stitle.Font = Enum.Font.GothamBold
+stitle.Parent = settingsFrame
+
+local function makeVolumeRow(labelText)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(0.85, 0, 0, 50)
+	row.BackgroundTransparency = 1
+	row.Parent = settingsFrame
+
+	local layout = settingsFrame:FindFirstChild("UIListLayout")
+	if not layout then
+		layout = Instance.new("UIListLayout")
+		layout.Padding = UDim.new(0, 10)
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.VerticalAlignment = Enum.VerticalAlignment.Center
+		layout.Parent = settingsFrame
+	end
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(0.6, 0, 1, 0)
+	lbl.Position = UDim2.new(0, 0, 0, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = labelText .. " (0–100)"
+	lbl.TextColor3 = Color3.new(1, 1, 1)
+	lbl.TextScaled = true
+	lbl.Font = Enum.Font.Gotham
+	lbl.TextXAlignment = Enum.TextXAlignment.Left
+	lbl.Parent = row
+
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(0.35, 0, 1, 0)
+	box.Position = UDim2.new(0.65, 0, 0, 0)
+	box.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	box.Text = "50"
+	box.TextScaled = true
+	box.Font = Enum.Font.Gotham
+	box.TextColor3 = Color3.new(1, 1, 1)
+	box.Parent = row
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = box
+
+	return box
+end
+
+local masterBox = makeVolumeRow("Master Volume")
+local sfxBox = makeVolumeRow("SFX Volume")
+
+local settingsBack = Instance.new("TextButton")
+settingsBack.Size = UDim2.new(0.5, 0, 0, 40)
+settingsBack.AnchorPoint = Vector2.new(0.5, 1)
+settingsBack.Position = UDim2.new(0.5, 0, 0.95, 0)
+settingsBack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+settingsBack.Text = "Back"
+settingsBack.TextColor3 = Color3.new(1, 1, 1)
+settingsBack.TextScaled = true
+settingsBack.Font = Enum.Font.GothamSemibold
+settingsBack.Parent = settingsFrame
+do
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = settingsBack
+end
+
+---------------------------------------------------------
+-- HELP PANEL
+---------------------------------------------------------
+local helpFrame = createPanel("HelpFrame")
+
+local htitle = Instance.new("TextLabel")
+htitle.Size = UDim2.new(1, 0, 0, 50)
+htitle.Position = UDim2.new(0, 0, 0, 10)
+htitle.BackgroundTransparency = 1
+htitle.Text = "Mission Briefing"
+htitle.TextColor3 = Color3.new(1, 1, 1)
+htitle.TextScaled = true
+htitle.Font = Enum.Font.GothamBold
+htitle.Parent = helpFrame
+
+local body = Instance.new("TextLabel")
+body.Size = UDim2.new(0.9, 0, 0.65, 0)
+body.Position = UDim2.new(0.5, 0, 0.55, 0)
+body.AnchorPoint = Vector2.new(0.5, 0.5)
+body.BackgroundTransparency = 1
+body.TextColor3 = Color3.new(1, 1, 1)
+body.TextWrapped = true
+body.TextYAlignment = Enum.TextYAlignment.Top
+body.Font = Enum.Font.Gotham
+body.Text = [[
+You are contacted by an undercover cybersecurity professional.
+
+Their agency is under heavy controversy. Someone inside the organization
+is leaking confidential data, repeatedly and intentionally.
+
+Your objectives:
+• Identify WHO is leaking the data
+• Determine WHAT they leaked
+• Figure out HOW they are doing it
+
+Use your in-game tablet to hack systems, analyze logs, and uncover the truth.
+]]
+body.TextScaled = false
+body.TextSize = 18
+body.Parent = helpFrame
+
+local helpBack = Instance.new("TextButton")
+helpBack.Size = UDim2.new(0.5, 0, 0, 40)
+helpBack.AnchorPoint = Vector2.new(0.5, 1)
+helpBack.Position = UDim2.new(0.5, 0, 0.95, 0)
+helpBack.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+helpBack.Text = "Back"
+helpBack.TextColor3 = Color3.new(1, 1, 1)
+helpBack.TextScaled = true
+helpBack.Font = Enum.Font.GothamSemibold
+helpBack.Parent = helpFrame
+do
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = helpBack
+end
+
+---------------------------------------------------------
+-- MENU SWITCHING
+---------------------------------------------------------
+local function showMain()
+	mainFrame.Visible = true
+	settingsFrame.Visible = false
+	helpFrame.Visible = false
+end
+
+local function showSettings()
+	mainFrame.Visible = false
+	settingsFrame.Visible = true
+	helpFrame.Visible = false
+end
+
+local function showHelp()
+	mainFrame.Visible = false
+	settingsFrame.Visible = false
+	helpFrame.Visible = true
+end
+
+---------------------------------------------------------
+-- SOUND CONTROL
+---------------------------------------------------------
+local function applyVolume()
+	local m = tonumber(masterBox.Text) or 50
+	local s = tonumber(sfxBox.Text) or 50
+	SoundService.Volume = math.clamp(m / 100, 0, 1)
+	SoundService:SetAttribute("SFXVolume", math.clamp(s / 100, 0, 1))
+end
+
+masterBox.FocusLost:Connect(applyVolume)
+sfxBox.FocusLost:Connect(applyVolume)
+
+---------------------------------------------------------
+-- CUTSCENE CALL
+---------------------------------------------------------
+local function startCutscene()
+	local evt = ReplicatedStorage:FindFirstChild("StartNewsCutscene")
+	if evt then
+		evt:FireServer()
+	else
+		warn("StartNewsCutscene RemoteEvent missing in ReplicatedStorage!")
+	end
+end
+
+---------------------------------------------------------
+-- BUTTON CONNECTIONS
+---------------------------------------------------------
+startButton.MouseButton1Click:Connect(function()
+	screenGui.Enabled = false
+	startCutscene()
+end)
+
+settingsButton.MouseButton1Click:Connect(showSettings)
+helpButton.MouseButton1Click:Connect(showHelp)
+settingsBack.MouseButton1Click:Connect(showMain)
+helpBack.MouseButton1Click:Connect(showMain)
+
+showMain()
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="51">
+          <Properties>
+            <string name="Name">tablet</string>
+            <string name="Source"><![CDATA[-- HackTablet OS (StarterPlayerScripts) - FULL CODE
+-- Fix included: URL box typing no longer gets focus stolen by terminal
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local CAS = game:GetService("ContextActionService")
+local StarterGui = game:GetService("StarterGui")
+local Http = game:GetService("HttpService")
+local Tween = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local ContentProvider = game:GetService("ContentProvider")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ObjectiveManager = require(ReplicatedStorage:WaitForChild("ObjectiveManager"))
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+local TOOL_NAME = "HackTablet"
+local Tool = nil
+
+local PROMPT = "rbxplayer@hackos:~$ "
+local AUDIO_TAG = "HackTablet_Audio"
+local E_BIND = "HackTablet_E_Block"
+local BLUR_NAME = "HackStartBlur"
+
+local SAVE_KEYS = { "Obj_Admin", "TimesLeaked" }
+
+local isEquipped = false
+local started = false
+local MainGUI, HintGUI
+local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel, MissionsFrame, MissionsList
+
+local DEBUG = true
+
+local function notify(t)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", t)
+	end)
+end
+
+local function dbg(msg)
+	if not DEBUG then return end
+	warn("[HackTablet]", msg)
+	notify({ Title = "HackTablet (debug)", Text = tostring(msg), Duration = 2 })
+end
+
+local function mk(t, p)
+	local i = Instance.new(t)
+	for k, v in pairs(p or {}) do
+		i[k] = v
+	end
+	return i
+end
+
+local function round(o, r)
+	mk("UICorner", { Parent = o, CornerRadius = UDim.new(0, r or 10) })
+end
+
+local function fadeVol(s, v, d)
+	if not s then return end
+	pcall(function()
+		Tween:Create(s, TweenInfo.new(d or 0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
+			Volume = math.clamp(v, 0, 10),
+		}):Play()
+	end)
+end
+
+notify({ Title = "SIMULATION WARNING", Text = "Simulated interface. Do not replicate in real life.", Duration = 5 })
+
+pcall(function()
+	if Player:GetAttribute("HasKeycardData") ~= nil then
+		Player:SetAttribute("HasKeycardData", nil)
+	end
+end)
+
+local function getSound()
+	local s = SoundService:FindFirstChild(AUDIO_TAG)
+	if s and s:IsA("Sound") then
+		return s
+	end
+	s = mk("Sound", {
+		Name = AUDIO_TAG,
+		SoundId = "rbxassetid://74606780873749",
+		Volume = 0,
+		Looped = false,
+		Parent = SoundService,
+	})
+	task.spawn(function()
+		pcall(function()
+			ContentProvider:PreloadAsync({ s })
+		end)
+	end)
+	return s
+end
+
+local function playAudio()
+	local s = getSound()
+	if not s.IsPlaying then
+		s.TimePosition = 0
+		s:Play()
+	end
+	fadeVol(s, 0.95, 0.4)
+end
+
+local function stopAudio()
+	local s = SoundService:FindFirstChild(AUDIO_TAG)
+	if not s then return end
+	fadeVol(s, 0, 0.25)
+	task.delay(0.3, function()
+		if s and s.IsPlaying then
+			s:Stop()
+		end
+	end)
+end
+
+local function isToolEquipped()
+	local c = Player.Character
+	return (Tool and c and Tool.Parent == c) or isEquipped
+end
+
+local function setEquipped(on)
+	isEquipped = on
+	Player:SetAttribute("HackTabletEquipped", on)
+end
+
+local function saveNow()
+	local out = {}
+	for _, k in ipairs(SAVE_KEYS) do
+		local v = Player:GetAttribute(k)
+		if v ~= nil then
+			out[k] = v
+		end
+	end
+	Player:SetAttribute("SaveBlob", Http:JSONEncode(out))
+	notify({ Title = "HackTablet", Text = "Progress saved.", Duration = 2 })
+end
+
+local function loadNow()
+	local raw = Player:GetAttribute("SaveBlob")
+	if type(raw) ~= "string" or #raw == 0 then
+		return
+	end
+	local ok, data = pcall(function()
+		return Http:JSONDecode(raw)
+	end)
+	if not ok or type(data) ~= "table" then
+		return
+	end
+	for k, v in pairs(data) do
+		Player:SetAttribute(k, v)
+	end
+	notify({ Title = "HackTablet", Text = "Progress loaded.", Duration = 2 })
+end
+
+local function teardownStart()
+	local blur = Lighting:FindFirstChild(BLUR_NAME)
+	if blur then blur:Destroy() end
+	local boot = PlayerGui:FindFirstChild("HackStart")
+	if boot then boot:Destroy() end
+end
+
+local function addLine(txt)
+	mk("TextLabel", {
+		Parent = TermOut,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Code,
+		TextSize = 15,
+		TextColor3 = Color3.fromRGB(172, 255, 198),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, -10, 0, 0),
+		Text = txt,
+	})
+	task.defer(function()
+		local layout = TermOut:FindFirstChild("UIListLayout")
+		if layout then
+			TermOut.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+			TermOut.CanvasPosition = Vector2.new(0, math.huge)
+		end
+	end)
+end
+
+local PAGES = {
+	["hackos://home"] =
+		"Welcome to HackOS (SIM)\n\nTry:\n- help\n- apps\n- missions\n- tips\n\nThis is a learning/simulation UI.",
+
+	["hackos://tips"] =
+		"Safety Tips (SIM)\n\n- Use strong passwords\n- Turn on 2FA\n- Do not click weird links\n- Ask an adult if unsure",
+
+	["hackos://missions"] =
+		"Missions (SIM)\n1) password-check\n2) phish-spotter\n3) safe-browsing\n\nType: mission <name>",
+
+	["hackos://apps"] =
+		"Apps (SIM)\n- Terminal\n- Browser\n- Notes (soon)\n\nType: open <app>",
+
+	["bloxplay.com/admin"] =
+		"BLOXPLAY ADMIN (SIM)\n\nLogin is simulated.\nHint: `admin on` in terminal.",
+
+	["www.bloxplay.com/admin"] =
+		"BLOXPLAY ADMIN (SIM)\n\nLogin is simulated.\nHint: `admin on` in terminal.",
+
+	["bloxplay.com/admin/employees"] =
+		"Employees (SIM)\n- rick_dev\n- novaplayz\n- marcus_lee\n- junpark",
+
+	["www.bloxplay.com/admin/employees"] =
+		"Employees (SIM)\n- rick_dev\n- novaplayz\n- marcus_lee\n- junpark",
+}
+
+local function normalizeUrl(url)
+	local u = tostring(url or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if u == "" then return "about:blank" end
+	local low = u:lower()
+
+	if low == "home" then return "hackos://home" end
+	if low == "tips" then return "hackos://tips" end
+	if low == "missions" then return "hackos://missions" end
+	if low == "apps" then return "hackos://apps" end
+
+	if low:sub(1, 8) == "hackos://" then
+		return low
+	end
+
+	low = low:gsub("^https?://", ""):gsub("/+$", "")
+	return low
+end
+
+local function navigateTo(url)
+	local uNorm = normalizeUrl(url)
+
+	if uNorm == "about:blank" then
+		PageLabel.Text = ""
+		return
+	end
+
+	if uNorm == "bloxplay.com/admin/employees" or uNorm == "www.bloxplay.com/admin/employees" then
+		local base = PAGES[uNorm] or ""
+		if Player:GetAttribute("Obj_Admin") then
+			base ..= "\n\n[Admin Mode: ON] (sim)"
+		end
+		PageLabel.Text = base
+		return
+	end
+
+	PageLabel.Text = PAGES[uNorm] or ('No renderer for "%s" (sim).'):format(url)
+end
+
+local function showHelp()
+	addLine("Kid-friendly SIM commands:")
+	addLine("help                        - show this list")
+	addLine("apps                        - list apps")
+	addLine("open <terminal|browser|notes> - switch screens")
+	addLine("visit <url|home|tips|missions|apps> - open a page (sim)")
+	addLine("ping <thing>                - check if something is reachable (sim)")
+	addLine("scan <place>                - safety scan (sim)")
+	addLine("phish <text>                - spot phishing clues (sim)")
+	addLine("password <text>             - password strength check (sim)")
+	addLine("mission <name>              - run a learning mission (sim)")
+	addLine("admin <on|off>              - toggle admin mode (sim)")
+	addLine("save | load                 - save/load progress")
+	addLine("clear                        - clear terminal")
+	addLine("time                         - show time")
+end
+
+local function phishCheck(text)
+	local t = (text or ""):lower()
+	local flags = 0
+	local clues = {}
+
+	local function flag(clue)
+		flags += 1
+		table.insert(clues, "- " .. clue)
+	end
+
+	if t:find("urgent") or t:find("immediately") then flag("It tries to rush you (pressure).") end
+	if t:find("password") or t:find("verify") then flag("Asks for passwords or verification.") end
+	if t:find("free") or t:find("winner") or t:find("prize") then flag("Too-good-to-be-true reward.") end
+	if t:find("gift card") then flag("Gift card request is a common scam.") end
+	if t:find("click") and (t:find("link") or t:find("http")) then flag("Wants you to click a link.") end
+
+	if flags == 0 then
+		addLine("Phish check (sim): looks okay, but always be careful.")
+	else
+		addLine(("Phish check (sim): %d suspicious clue(s) found:"):format(flags))
+		for _, c in ipairs(clues) do addLine(c) end
+	end
+end
+
+local function passwordCheck(pw)
+	local s = tostring(pw or "")
+	if #s == 0 then
+		addLine("Try: password MyCoolPass123!")
+		return
+	end
+
+	local score = 0
+	if #s >= 12 then score += 2 elseif #s >= 8 then score += 1 end
+	if s:match("%d") then score += 1 end
+	if s:match("%l") and s:match("%u") then score += 1 end
+	if s:match("[%p%W_]") then score += 1 end
+
+	if score <= 1 then
+		addLine("Password check (sim): weak")
+		addLine("Tip: use 12+ chars, mix letters/numbers/symbols.")
+	elseif score <= 3 then
+		addLine("Password check (sim): okay")
+		addLine("Tip: longer is stronger. Try a fun passphrase.")
+	else
+		addLine("Password check (sim): strong")
+	end
+end
+
+local function handle(cmdLine)
+	local raw = tostring(cmdLine or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	addLine(PROMPT .. raw)
+
+	local args = {}
+	for w in raw:gmatch("%S+") do
+		args[#args + 1] = w
+	end
+	local cmd = (args[1] or ""):lower()
+
+	if cmd == "" then
+		addLine(PROMPT)
+		return
+	end
+
+	local function rest(from)
+		local t = {}
+		for i = from, #args do t[#t+1] = args[i] end
+		return table.concat(t, " ")
+	end
+
+	if cmd == "help" then
+		showHelp()
+
+	elseif cmd == "apps" then
+		addLine("Apps (SIM): terminal, browser, notes (soon)")
+		addLine("Tip: open browser")
+
+	elseif cmd == "open" then
+		local which = (args[2] or ""):lower()
+		if which == "terminal" then
+			TermFrame.Visible = true
+			BrowserFrame.Visible = false
+			if TermInput then TermInput:CaptureFocus() end
+			addLine("Switched to Terminal.")
+		elseif which == "browser" then
+			TermFrame.Visible = false
+			BrowserFrame.Visible = true
+			addLine("Switched to Browser.")
+			if UrlBox and UrlBox.Text == "" then
+				UrlBox.Text = "home"
+				navigateTo("home")
+			end
+			pcall(function() UrlBox:CaptureFocus() end)
+		elseif which == "notes" then
+			addLine("Notes app (sim) coming soon")
+		else
+			addLine("Try: open terminal OR open browser")
+		end
+
+	elseif cmd == "visit" then
+		local target = rest(2)
+		addLine("Opening " .. (target ~= "" and target or "about:blank") .. " ... (sim)")
+		if UrlBox then UrlBox.Text = target end
+		navigateTo(target)
+
+	elseif cmd == "ping" then
+		local target = rest(2)
+		if target == "" then target = "server" end
+		addLine(("Pinging %s ... (sim)"):format(target))
+		addLine("Reply from " .. target .. ": time=12ms (sim)")
+
+	elseif cmd == "scan" then
+		local where = rest(2)
+		if where == "" then where = "this device" end
+		addLine(("Running safety scan on %s ... (sim)"):format(where))
+		addLine("Result: 0 threats found (sim)")
+
+	elseif cmd == "phish" then
+		phishCheck(rest(2))
+
+	elseif cmd == "password" then
+		passwordCheck(rest(2))
+
+	elseif cmd == "mission" then
+		local name = (args[2] or ""):lower()
+		if name == "" then
+			addLine("Try: mission phish-spotter")
+		elseif name == "phish-spotter" then
+			addLine("Mission: Phish Spotter (SIM)")
+			addLine("Try: phish \"URGENT! Click link to win a prize\"")
+		elseif name == "password-check" then
+			addLine("Mission: Password Check (SIM)")
+			addLine("Try: password MyCoolPass123!")
+		elseif name == "safe-browsing" then
+			addLine("Mission: Safe Browsing (SIM)")
+			addLine("Tip: Only visit pages you trust.")
+		else
+			addLine("Unknown mission. Try: visit missions OR mission phish-spotter")
+		end
+
+	elseif cmd == "admin" then
+		local on = (args[2] or ""):lower() == "on"
+		Player:SetAttribute("Obj_Admin", on)
+		addLine("Admin mode (sim) = " .. tostring(on))
+
+	elseif cmd == "save" then
+		saveNow()
+	elseif cmd == "load" then
+		loadNow()
+
+	elseif cmd == "time" then
+		addLine(os.date("%Y-%m-%d %H:%M:%S"))
+
+	elseif cmd == "clear" or cmd == "reset" then
+		TermOut:ClearAllChildren()
+		mk("UIListLayout", { Parent = TermOut, Name = "UIListLayout", Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
+		addLine(PROMPT)
+		return
+
+	else
+		addLine("I do not know that command. Type: help")
+	end
+
+	addLine(PROMPT)
+end
+
+local function buildMainUI()
+	local gui = mk("ScreenGui", { Parent = PlayerGui, Name = "TabletGUI", IgnoreGuiInset = true, ResetOnSpawn = false, Enabled = false })
+	local desktop = mk("Frame", { Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(10, 14, 22) })
+	mk("UIGradient", {
+		Parent = desktop,
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(23, 34, 58)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(7, 10, 16)),
+		}),
+		Rotation = 120,
+	})
+
+	local top = mk("Frame", { Parent = desktop, Size = UDim2.new(1, 0, 0, 50), BackgroundColor3 = Color3.fromRGB(17, 22, 32), BackgroundTransparency = 0.08 })
+	mk("TextLabel", {
+		Parent = top,
+		BackgroundTransparency = 1,
+		Text = "HackOS v1.4",
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(220, 236, 255),
+		Position = UDim2.new(0, 14, 0, 0),
+		Size = UDim2.fromOffset(180, 50),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	ClockLabel = mk("TextLabel", {
+		Parent = top,
+		BackgroundTransparency = 1,
+		Text = "--:--:--",
+		Font = Enum.Font.Code,
+		TextSize = 15,
+		TextColor3 = Color3.fromRGB(190, 208, 240),
+		Position = UDim2.new(1, -170, 0, 0),
+		Size = UDim2.fromOffset(160, 50),
+		TextXAlignment = Enum.TextXAlignment.Right,
+	})
+
+	local function button(text, x, w)
+		local b = mk("TextButton", {
+			Parent = top,
+			Text = text,
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 14,
+			TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = Color3.fromRGB(45, 57, 84),
+			Size = UDim2.fromOffset(w or 92, 30),
+			Position = UDim2.new(0, x, 0, 10),
+		})
+		round(b, 9)
+		return b
+	end
+
+	local bTerm = button("Terminal", 180, 80)
+	local bBrowser = button("Browser", 265, 80)
+	local bMissions = button("Missions", 350, 80)
+	local bSave = button("Save", 435, 72)
+	local bLoad = button("Load", 512, 72)
+	local bClose = button("Close", 589, 72)
+
+	local pad = mk("Frame", {
+		Parent = desktop,
+		Position = UDim2.new(0, 14, 0, 64),
+		Size = UDim2.new(1, -28, 1, -78),
+		BackgroundColor3 = Color3.fromRGB(15, 19, 28),
+		BackgroundTransparency = 0.1,
+	})
+	round(pad, 14)
+
+	TermFrame = mk("Frame", {
+		Parent = pad,
+		BackgroundColor3 = Color3.fromRGB(11, 14, 18),
+		Size = UDim2.new(0.52, -6, 1, -12),
+		Position = UDim2.new(0, 6, 0, 6),
+	})
+	BrowserFrame = mk("Frame", {
+		Parent = pad,
+		BackgroundColor3 = Color3.fromRGB(236, 238, 243),
+		Size = UDim2.new(0.48, -6, 1, -12),
+		Position = UDim2.new(0.52, 0, 0, 6),
+		Visible = false,
+	})
+	round(TermFrame, 12)
+	round(BrowserFrame, 12)
+	
+	MissionsFrame = mk("Frame", {
+		Parent = pad,
+		BackgroundColor3 = Color3.fromRGB(15, 19, 28),
+		Size = UDim2.new(1, -12, 1, -12),
+		Position = UDim2.new(0, 6, 0, 6),
+		Visible = false,
+	})
+	round(MissionsFrame, 12)
+
+	mk("TextLabel", { Parent = MissionsFrame, BackgroundTransparency = 1, Text = " ACTIVE MISSIONS", Font = Enum.Font.GothamBlack, TextSize = 18, TextColor3 = Color3.fromRGB(220, 236, 255), Position = UDim2.new(0, 10, 0, 10), Size = UDim2.new(1, -20, 0, 30), TextXAlignment = Enum.TextXAlignment.Left })
+
+	MissionsList = mk("ScrollingFrame", { Parent = MissionsFrame, BackgroundColor3 = Color3.fromRGB(8, 10, 13), BorderSizePixel = 0, ScrollBarThickness = 6, Size = UDim2.new(1, -20, 1, -50), Position = UDim2.new(0, 10, 0, 40) })
+	round(MissionsList, 10)
+	mk("UIListLayout", { Parent = MissionsList, Name = "UIListLayout", Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder })
+
+	TermOut = mk("ScrollingFrame", {
+		Parent = TermFrame,
+		BackgroundColor3 = Color3.fromRGB(8, 10, 13),
+		BorderSizePixel = 0,
+		ScrollBarThickness = 6,
+		Size = UDim2.new(1, -16, 1, -78),
+		Position = UDim2.new(0, 8, 0, 8),
+	})
+	round(TermOut, 10)
+	mk("UIListLayout", {
+		Parent = TermOut,
+		Name = "UIListLayout",
+		Padding = UDim.new(0, 4),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	})
+
+	local h = UIS.TouchEnabled and 40 or 32
+	TermInput = mk("TextBox", {
+		Parent = TermFrame,
+		Text = "",
+		ClearTextOnFocus = true,
+		PlaceholderText = "Type command...",
+		Font = Enum.Font.Code,
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(172, 255, 198),
+		BackgroundColor3 = Color3.fromRGB(8, 10, 13),
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, -(UIS.TouchEnabled and 112 or 16), 0, h),
+		Position = UDim2.new(0, 8, 1, -(8 + h)),
+	})
+	round(TermInput, 9)
+
+	if UIS.TouchEnabled then
+		local run = mk("TextButton", {
+			Parent = TermFrame,
+			Text = "Run",
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 16,
+			TextColor3 = Color3.new(1, 1, 1),
+			BackgroundColor3 = Color3.fromRGB(72, 126, 255),
+			Size = UDim2.fromOffset(90, h),
+			Position = UDim2.new(1, -98, 1, -(8 + h)),
+		})
+		round(run, 9)
+		run.MouseButton1Click:Connect(function()
+			local c = TermInput.Text
+			TermInput.Text = ""
+			handle(c)
+			task.defer(function()
+				if TermInput and TermInput.Parent and TermFrame.Visible then
+					TermInput:CaptureFocus()
+				end
+			end)
+		end)
+	end
+
+	UrlBox = mk("TextBox", {
+		Parent = BrowserFrame,
+		Text = "",
+		PlaceholderText = "home (or type a URL)",
+		Font = Enum.Font.Gotham,
+		TextSize = 15,
+		TextColor3 = Color3.new(0, 0, 0),
+		BackgroundColor3 = Color3.fromRGB(223, 227, 236),
+		Size = UDim2.new(1, -88, 0, 32),
+		Position = UDim2.new(0, 8, 0, 8),
+	})
+	round(UrlBox, 8)
+
+	local goBtn = mk("TextButton", {
+		Parent = BrowserFrame,
+		Text = "GO",
+		Font = Enum.Font.GothamSemibold,
+		TextSize = 14,
+		TextColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Color3.fromRGB(79, 131, 255),
+		Size = UDim2.fromOffset(64, 32),
+		Position = UDim2.new(1, -72, 0, 8),
+	})
+	round(goBtn, 8)
+
+	PageLabel = mk("TextLabel", {
+		Parent = BrowserFrame,
+		BackgroundTransparency = 1,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Font = Enum.Font.Gotham,
+		TextSize = 16,
+		TextColor3 = Color3.new(0, 0, 0),
+		Text = "",
+		Size = UDim2.new(1, -16, 1, -48),
+		Position = UDim2.new(0, 8, 0, 44),
+	})
+
+	goBtn.MouseButton1Click:Connect(function()
+		navigateTo(UrlBox.Text)
+	end)
+
+	UIS.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		if input.KeyCode ~= Enum.KeyCode.Return and input.KeyCode ~= Enum.KeyCode.KeypadEnter then return end
+
+		local focused = nil
+		pcall(function() focused = UIS:GetFocusedTextBox() end)
+		if focused == UrlBox then
+			navigateTo(UrlBox.Text)
+		end
+	end)
+
+	UrlBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			navigateTo(UrlBox.Text)
+		end
+	end)
+
+	-- FIX: Do not force terminal focus when browser is open or another textbox is focused.
+	local function canRefocusTerminal()
+		if not (MainGUI and MainGUI.Enabled) then return false end
+		if not (TermFrame and TermFrame.Visible) then return false end
+		if not (TermInput and TermInput.Parent) then return false end
+		if not (isToolEquipped() and started) then return false end
+		local focused = nil
+		pcall(function() focused = UIS:GetFocusedTextBox() end)
+		return focused == nil or focused == TermInput
+	end
+
+	TermInput.FocusLost:Connect(function(enter)
+		if enter then
+			local c = TermInput.Text
+			TermInput.Text = ""
+			handle(c)
+		end
+		task.defer(function()
+			if canRefocusTerminal() then
+				TermInput:CaptureFocus()
+			end
+		end)
+	end)
+
+	bTerm.MouseButton1Click:Connect(function()
+		TermFrame.Visible = true
+		BrowserFrame.Visible = false
+		MissionsFrame.Visible = false
+		TermInput:CaptureFocus()
+	end)
+
+	bBrowser.MouseButton1Click:Connect(function()
+		TermFrame.Visible = false
+		BrowserFrame.Visible = true
+		MissionsFrame.Visiible = false
+		if UrlBox and UrlBox.Text == "" then
+			UrlBox.Text = "home"
+			navigateTo("home")
+		end
+		pcall(function() UrlBox:CaptureFocus() end)
+	end)
+	bMissions.MouseButton1Click:Connect(function()
+		TermFrame.Visible = false
+		BrowserFrame.Visible = false
+		MissionsFrame.Visible = true
+	end)
+
+	bSave.MouseButton1Click:Connect(saveNow)
+	bLoad.MouseButton1Click:Connect(loadNow)
+	bClose.MouseButton1Click:Connect(function()
+		gui.Enabled = false
+		stopAudio()
+	end)
+
+	addLine(PROMPT)
+	return gui
+end
+
+local function playStart(onDone)
+	local blur = mk("BlurEffect", { Parent = Lighting, Name = BLUR_NAME, Size = 12 })
+	local gui = mk("ScreenGui", { Parent = PlayerGui, Name = "HackStart", IgnoreGuiInset = true, ResetOnSpawn = false })
+	local bg = mk("Frame", { Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(8, 10, 14) })
+	local card = mk("Frame", {
+		Parent = bg,
+		Size = UDim2.fromOffset(420, 180),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = Color3.fromRGB(16, 22, 35),
+	})
+	round(card, 16)
+	mk("UIStroke", { Parent = card, Color = Color3.fromRGB(80, 123, 255), Thickness = 1, Transparency = 0.2 })
+	mk("TextLabel", {
+		Parent = card,
+		BackgroundTransparency = 1,
+		Text = "Booting HackOS",
+		Font = Enum.Font.GothamBold,
+		TextSize = 28,
+		TextColor3 = Color3.fromRGB(220, 235, 255),
+		Size = UDim2.new(1, 0, 0, 44),
+		Position = UDim2.new(0, 0, 0, 18),
+	})
+
+	local bar = mk("Frame", {
+		Parent = card,
+		BackgroundColor3 = Color3.fromRGB(30, 40, 62),
+		Size = UDim2.new(1, -40, 0, 12),
+		Position = UDim2.new(0, 20, 1, -42),
+	})
+	round(bar, 8)
+
+	local fill = mk("Frame", { Parent = bar, BackgroundColor3 = Color3.fromRGB(86, 140, 255), Size = UDim2.new(0, 0, 1, 0) })
+	round(fill, 8)
+
+	local t = Tween:Create(fill, TweenInfo.new(1.0, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 1, 0) })
+	t:Play()
+
+	t.Completed:Connect(function()
+		gui:Destroy()
+		Tween:Create(blur, TweenInfo.new(0.2), { Size = 0 }):Play()
+		task.delay(0.22, function()
+			if blur then blur:Destroy() end
+		end)
+		if onDone then onDone() end
+	end)
+end
+
+local function buildHint()
+	local gui = mk("ScreenGui", { Parent = PlayerGui, Name = "TabletHint", IgnoreGuiInset = true, ResetOnSpawn = false, Enabled = false })
+	local shade = mk("Frame", { Parent = gui, Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(5, 8, 12), BackgroundTransparency = 0.3 })
+	local panel = mk("Frame", {
+		Parent = shade,
+		BackgroundColor3 = Color3.fromRGB(15, 20, 32),
+		Size = UDim2.fromOffset(430, 190),
+		Position = UDim2.fromScale(0.5, 0.62),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+	})
+	round(panel, 16)
+
+	mk("TextLabel", {
+		Parent = panel,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		TextSize = 28,
+		TextColor3 = Color3.fromRGB(225, 235, 255),
+		Text = "HackOS Tablet",
+		Size = UDim2.new(1, 0, 0, 36),
+		Position = UDim2.new(0, 0, 0, 16),
+	})
+
+	mk("TextLabel", {
+		Parent = panel,
+		BackgroundTransparency = 1,
+		Font = Enum.Font.Gotham,
+		TextSize = 16,
+		TextColor3 = Color3.fromRGB(180, 200, 230),
+		TextWrapped = true,
+		Text = UIS.TouchEnabled and "Tap START to boot." or "Click START to boot.",
+		Size = UDim2.new(1, -40, 0, 42),
+		Position = UDim2.new(0, 20, 0, 60),
+	})
+
+	local startBtn = mk("TextButton", {
+		Parent = panel,
+		Text = "START",
+		Font = Enum.Font.GothamSemibold,
+		TextSize = 18,
+		TextColor3 = Color3.new(1, 1, 1),
+		BackgroundColor3 = Color3.fromRGB(79, 131, 255),
+		Size = UDim2.fromOffset(210, 42),
+		Position = UDim2.new(0.5, -105, 1, -58),
+	})
+	round(startBtn, 12)
+
+	startBtn.MouseButton1Click:Connect(function()
+		if not isToolEquipped() then
+			gui.Enabled = false
+			dbg("Start clicked but tool not equipped.")
+			return
+		end
+		gui.Enabled = false
+		playStart(function()
+			if isToolEquipped() and MainGUI then
+				MainGUI.Enabled = true
+				started = true
+				playAudio()
+				if TermInput then TermInput:CaptureFocus() end
+				dbg("Boot complete; main UI enabled.")
+			else
+				stopAudio()
+				dbg("Boot finished but not equipped; stopping audio.")
+			end
+		end)
+	end)
+
+	return gui
+end
+
+local function allowE()
+	return isToolEquipped() and started and MainGUI and MainGUI.Enabled
+end
+
+local function bindEGuard()
+	CAS:UnbindAction(E_BIND)
+	CAS:BindActionAtPriority(E_BIND, function(_, state)
+		if state ~= Enum.UserInputState.Begin then
+			return Enum.ContextActionResult.Pass
+		end
+		return allowE() and Enum.ContextActionResult.Pass or Enum.ContextActionResult.Sink
+	end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.E)
+end
+
+ObjectiveManager.Changed:Connect(function(objectivesList)
+	if not MissionsList then return end
+	-- Clear old tasks
+	for _, child in ipairs(MissionsList:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	-- Build new tasks
+	for _, taskInfo in ipairs(objectivesList) do
+		local taskRow = mk("Frame", { Parent = MissionsList, BackgroundColor3 = Color3.fromRGB(20, 26, 38), Size = UDim2.new(1, -10, 0, 50) })
+		round(taskRow, 8)
+		mk("TextLabel", { Parent = taskRow, BackgroundTransparency = 1, Text = taskInfo.text, Font = Enum.Font.GothamSemibold, TextSize = 14, TextColor3 = Color3.new(1, 1, 1), Position = UDim2.new(0, 10, 0, 5), Size = UDim2.new(1, -20, 0, 20), TextXAlignment = Enum.TextXAlignment.Left })
+
+		local statusColor = Color3.fromRGB(150, 150, 150)
+		if taskInfo.status == "Completed" then statusColor = Color3.fromRGB(0, 255, 100)
+		elseif taskInfo.status == "In Progress" then statusColor = Color3.fromRGB(255, 200, 0) end
+
+		mk("TextLabel", { Parent = taskRow, BackgroundTransparency = 1, Text = string.upper(taskInfo.status), Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = statusColor, Position = UDim2.new(0, 10, 0, 25), Size = UDim2.new(1, -20, 0, 20), TextXAlignment = Enum.TextXAlignment.Left })
+	end
+end)
+
+MainGUI = buildMainUI()
+HintGUI = buildHint()
+bindEGuard()
+dbg("UI built. Waiting for tool: " .. TOOL_NAME)
+
+task.spawn(function()
+	while MainGUI and MainGUI.Parent do
+		if ClockLabel then
+			ClockLabel.Text = os.date("%H:%M:%S")
+		end
+		task.wait(1)
+	end
+end)
+
+local function onEquipped()
+	setEquipped(true)
+	if HintGUI and not started then
+		HintGUI.Enabled = true
+	end
+	bindEGuard()
+	dbg("Tool equipped; showing hint.")
+end
+
+local function onUnequipped()
+	setEquipped(false)
+	started = false
+	if HintGUI then HintGUI.Enabled = false end
+	if MainGUI then MainGUI.Enabled = false end
+	stopAudio()
+	teardownStart()
+	bindEGuard()
+	dbg("Tool unequipped; hiding UI.")
+end
+
+local function hookTool(t)
+	if Tool == t then return end
+	Tool = t
+	dbg("Found tool instance: " .. t:GetFullName())
+
+	t.AncestryChanged:Connect(function(_, parent)
+		if not parent and Tool == t then
+			dbg("Tool removed/destroyed.")
+			onUnequipped()
+			Tool = nil
+		end
+	end)
+
+	t.Equipped:Connect(onEquipped)
+	t.Unequipped:Connect(onUnequipped)
+
+	local char = Player.Character
+	if char and t.Parent == char then
+		onEquipped()
+	end
+end
+
+local function findTool()
+	local char = Player.Character
+	local backpack = Player:FindFirstChildOfClass("Backpack")
+
+	if char then
+		local t = char:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	if backpack then
+		local t = backpack:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	return nil
+end
+
+local function scanForToolNow()
+	local t = findTool()
+	if t then hookTool(t) end
+end
+
+local function watch(container)
+	if not container then return end
+	container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == TOOL_NAME then
+			hookTool(child)
+		end
+	end)
+	local existing = container:FindFirstChild(TOOL_NAME)
+	if existing and existing:IsA("Tool") then
+		hookTool(existing)
+	end
+end
+
+watch(Player:WaitForChild("Backpack"))
+watch(Player.Character or Player.CharacterAdded:Wait())
+scanForToolNow()
+
+Player.CharacterAdded:Connect(function(char)
+	started = false
+	stopAudio()
+	teardownStart()
+	bindEGuard()
+	watch(char)
+	task.defer(scanForToolNow)
+	dbg("CharacterAdded; re-watching for tool.")
+end)
+
+local lastEquipped = false
+RunService.Heartbeat:Connect(function()
+	if not Tool then
+		scanForToolNow()
+		return
+	end
+	local equippedNow = isToolEquipped()
+	if equippedNow ~= lastEquipped then
+		lastEquipped = equippedNow
+		if equippedNow then
+			onEquipped()
+		else
+			onUnequipped()
+		end
+	end
+end)
+
+if MainGUI then
+	MainGUI:GetPropertyChangedSignal("Enabled"):Connect(bindEGuard)
+end
+
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="52">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="FilteringEnabled">true</bool>
+      <bool name="NeedsPivotMigration">false</bool>
+    </Properties>
+    <Item class="Part" referent="53">
+      <Properties>
+        <string name="Name">Baseplate</string>
+        <bool name="Anchored">true</bool>
+        <Color3uint8 name="Color3uint8">6512483</Color3uint8>
+        <bool name="Locked">true</bool>
+        <Vector3 name="Position">
+          <X>0</X>
+          <Y>-10</Y>
+          <Z>0</Z>
+        </Vector3>
+        <Vector3 name="size">
+          <X>512</X>
+          <Y>20</Y>
+          <Z>512</Z>
+        </Vector3>
+      </Properties>
+    </Item>
+  </Item>
+</roblox>

@@ -3,7 +3,8 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local SuspicionManager = require(ReplicatedStorage:WaitForChild("SuspicionManager"))
+local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
 
 local GUARD = Workspace:WaitForChild("GuardOutside")
 local RIG = GUARD:WaitForChild("Rig")
@@ -15,11 +16,11 @@ local PATROL_SPEED = 8
 local CHASE_SPEED = 13
 local VISION_RANGE = 60
 local VISION_ANGLE = math.cos(math.rad(60)) -- 120° total FOV
-local CHASE_TIMEOUT = 5 -- seconds before giving up
+local CHASE_TIMEOUT = 3 -- seconds before giving up
 
 -- Suspicion tuning (Outside)
-local SUSPICION_TICK_SEEN = 1.5      -- add when actively seeing player (per tick)
-local SUSPICION_TICK_RATE = 0.2    -- matches chase tick wait
+local SUSPICION_PER_TICK = 2      -- matches camera suspicion rate
+local SUSPICION_TICK_RATE = 0.25  -- matches camera suspicion cadence
 
 -- === SUSPICION THROTTLE/BATCH ===
 local SUSPICION_PUSH_INTERVAL = 0.5 -- send at most 2x/sec
@@ -169,27 +170,19 @@ local function patrol()
 			end
 		end
 
-		-- 3. Chase logic (With memory)
+		-- 3. Chase logic (fixed chase window)
 		if nearestPlayer and nearestHRP then
 			HUMANOID.WalkSpeed = CHASE_SPEED
 			playWalk()
-			local startTime = os.clock()
-			local lastSeenTime = os.clock() -- Gives the guard a "memory"
+			local chaseStartTime = os.clock()
 
-			while os.clock() - startTime < CHASE_TIMEOUT do
+			while os.clock() - chaseStartTime < CHASE_TIMEOUT do
 				local char = nearestPlayer.Character
 				local hum = char and char:FindFirstChildOfClass("Humanoid")
 				if not char or not safeAlive(hum) then break end
 
-				-- Update memory if we can still see them
 				if canSeePlayer(nearestHRP) then
-					lastSeenTime = os.clock()
-					queueSuspicion(nearestPlayer, SUSPICION_TICK_SEEN)
-				end
-
-				-- If we haven't seen them for 2.5 seconds, give up the chase
-				if os.clock() - lastSeenTime > 2.5 then 
-					break 
+					queueSuspicion(nearestPlayer, SUSPICION_PER_TICK)
 				end
 
 				HUMANOID:MoveTo(nearestHRP.Position)

@@ -3,58 +3,85 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local humanoid
-local animate
 local crouching = false
 
+local walkTrack
+local idleTrack
+
+local CROUCH_SPEED = 6
+local NORMAL_SPEED = 16
+
+local WALK_ANIM = "rbxassetid://89110259028624"
+local IDLE_ANIM = "rbxassetid://88755635491494"
+
+local function stopAll()
+	if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
+	if idleTrack and idleTrack.IsPlaying then idleTrack:Stop() end
+end
+
+local function startCrouch()
+	if not humanoid then return end
+	crouching = true
+	humanoid.WalkSpeed = CROUCH_SPEED
+end
+
+local function stopCrouch()
+	if not humanoid then return end
+	crouching = false
+	humanoid.WalkSpeed = NORMAL_SPEED
+	stopAll()
+end
+
 local function setupCharacter(character)
-    humanoid = character:WaitForChild("Humanoid")
+	humanoid = character:WaitForChild("Humanoid")
+
+	local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+
+	-- Walk animation
+	local walkAnim = Instance.new("Animation")
+	walkAnim.AnimationId = WALK_ANIM
+	walkTrack = animator:LoadAnimation(walkAnim)
+	walkTrack.Priority = Enum.AnimationPriority.Movement
+
+	-- Idle animation
+	local idleAnim = Instance.new("Animation")
+	idleAnim.AnimationId = IDLE_ANIM
+	idleTrack = animator:LoadAnimation(idleAnim)
+	idleTrack.Priority = Enum.AnimationPriority.Movement
+
+	stopCrouch()
 end
 
 if player.Character then
-    setupCharacter(player.Character)
+	setupCharacter(player.Character)
 end
 
 player.CharacterAdded:Connect(setupCharacter)
 
--- Crouch when holding LeftShift
+-- Toggle crouch
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
+	if gameProcessed or not humanoid then return end
 
-    if input.KeyCode == Enum.KeyCode.LeftShift then
-        crouching = true
-        humanoid.WalkSpeed = 6
-
-        local animation = Instance.new("Animation")
-        animation.AnimationId = "rbxassetid://89110259028624"
-
-        animate = humanoid:LoadAnimation(animation)
-        animate:Play()
-    end
+	if input.KeyCode == Enum.KeyCode.LeftShift then
+		if crouching then
+			stopCrouch()
+		else
+			startCrouch()
+		end
+	end
 end)
 
--- Stop crouch when releasing LeftShift
-UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.LeftShift then
-        crouching = false
-        humanoid.WalkSpeed = 16
-
-        if animate then
-            animate:Stop()
-        end
-    end
-end)
-
--- Stop animation when not moving
+-- Handle animation switching
 RunService.RenderStepped:Connect(function()
-    if crouching and humanoid then
-        if humanoid.MoveDirection.Magnitude < 0.1 then
-            if animate and animate.IsPlaying then
-                animate:Stop()
-            end
-        else
-            if animate and not animate.IsPlaying then
-                animate:Play()
-            end
-        end
-    end
+	if not humanoid or not crouching then return end
+
+	local moving = humanoid.MoveDirection.Magnitude > 0.1
+
+	if moving then
+		if idleTrack.IsPlaying then idleTrack:Stop() end
+		if not walkTrack.IsPlaying then walkTrack:Play() end
+	else
+		if walkTrack.IsPlaying then walkTrack:Stop() end
+		if not idleTrack.IsPlaying then idleTrack:Play() end
+	end
 end)
