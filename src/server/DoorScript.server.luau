@@ -59,7 +59,7 @@ while task.wait(0.2) do
 		local char = player.Character
 		if char and char:FindFirstChild("HumanoidRootPart") then
 			local distance = (char.HumanoidRootPart.Position - leftClosedPivot.Position).Magnitude
-			if distance <= openDistance then
+			if distance <= openDistance and player:GetAttribute("UnlockedSlidingDoor") == true then
 				playerNear = true
 				break
 			end
