@@ -89,15 +89,9 @@ end)
 -- === THE TRIGGER LOGIC ===
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Create the "mailbox" (RemoteEvent) if it doesn't exist yet
-local popupEvent = ReplicatedStorage:FindFirstChild("ShowEducationalPopup")
-if not popupEvent then
-	popupEvent = Instance.new("RemoteEvent")
-	popupEvent.Name = "ShowEducationalPopup"
-	popupEvent.Parent = ReplicatedStorage
-end
+-- WaitForChild guarantees it uses the exact same one the Server uses!
+local popupEvent = ReplicatedStorage:WaitForChild("ShowEducationalPopup")
 
--- Listen for a message from the server
 popupEvent.OnClientEvent:Connect(function(title, message)
 	titleText.Text = title
 	lessonText.Text = message
