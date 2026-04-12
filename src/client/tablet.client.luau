@@ -1,6 +1,8 @@
--- HackTablet OS (StarterPlayerScripts) - FULL CODE
--- Simulation-only cybersecurity tablet for a fictional game streaming company
--- Missions tab logic/UI/objective system left intact
+-- HackTablet OS (StarterPlayerScripts)
+-- ONLY the needed fixes applied:
+-- 1) removed debug notifications/warns
+-- 2) fixed re-open after Close by resetting started state
+-- 3) fixed ObjectiveManager require path to Shared
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
@@ -13,7 +15,9 @@ local SoundService = game:GetService("SoundService")
 local ContentProvider = game:GetService("ContentProvider")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ObjectiveManager = require(ReplicatedStorage:WaitForChild("ObjectiveManager"))
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local ObjectiveManager = require(Shared:WaitForChild("ObjectiveManager"))
 
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
@@ -37,7 +41,7 @@ local BrowserStatusLabel, BrowserContent, LinkBar
 local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame
 local PacketPage, PacketToolbar, PacketListFrame, PacketIPBox, PacketDNSBox, PacketApplyBtn, PacketClearBtn, PacketFollowBtn
 
-local DEBUG = true
+local DEBUG = false
 
 local browserState = {
 	adminLoggedIn = false,
@@ -280,10 +284,7 @@ local function notify(t)
 	end)
 end
 
-local function dbg(msg)
-	if not DEBUG then return end
-	warn("[HackTablet]", msg)
-	notify({ Title = "HackTablet (debug)", Text = tostring(msg), Duration = 2 })
+local function dbg(_msg)
 end
 
 local function mk(t, p)
@@ -1887,7 +1888,6 @@ local function buildMainUI()
 		local shown = tostring(AdminPassBox.Text or "")
 
 		if shown == real then
-			-- initial direct set or pasted plaintext
 			real = shown
 		elseif shown ~= string.rep("*", #real) then
 			if #shown > #real then
@@ -2272,7 +2272,9 @@ local function buildMainUI()
 	bLoad.MouseButton1Click:Connect(loadNow)
 	bClose.MouseButton1Click:Connect(function()
 		gui.Enabled = false
+		started = false
 		stopAudio()
+		teardownStart()
 	end)
 
 	addLine(PROMPT)
@@ -2401,7 +2403,6 @@ local function buildHint()
 	startBtn.MouseButton1Click:Connect(function()
 		if not isToolEquipped() then
 			gui.Enabled = false
-			dbg("Start clicked but tool not equipped.")
 			return
 		end
 		gui.Enabled = false
@@ -2411,10 +2412,8 @@ local function buildHint()
 				started = true
 				playAudio()
 				if TermInput then TermInput:CaptureFocus() end
-				dbg("Boot complete; main UI enabled.")
 			else
 				stopAudio()
-				dbg("Boot finished but not equipped; stopping audio.")
 			end
 		end)
 	end)
@@ -2489,7 +2488,6 @@ end)
 MainGUI = buildMainUI()
 HintGUI = buildHint()
 bindEGuard()
-dbg("UI built. Waiting for tool: " .. TOOL_NAME)
 
 task.spawn(function()
 	while MainGUI and MainGUI.Parent do
@@ -2506,7 +2504,6 @@ local function onEquipped()
 		HintGUI.Enabled = true
 	end
 	bindEGuard()
-	dbg("Tool equipped; showing hint.")
 end
 
 local function onUnequipped()
@@ -2517,17 +2514,14 @@ local function onUnequipped()
 	stopAudio()
 	teardownStart()
 	bindEGuard()
-	dbg("Tool unequipped; hiding UI.")
 end
 
 local function hookTool(t)
 	if Tool == t then return end
 	Tool = t
-	dbg("Found tool instance: " .. t:GetFullName())
 
 	t.AncestryChanged:Connect(function(_, parent)
 		if not parent and Tool == t then
-			dbg("Tool removed/destroyed.")
 			onUnequipped()
 			Tool = nil
 		end
@@ -2586,7 +2580,6 @@ Player.CharacterAdded:Connect(function(char)
 	bindEGuard()
 	watch(char)
 	task.defer(scanForToolNow)
-	dbg("CharacterAdded; re-watching for tool.")
 end)
 
 local lastEquipped = false
