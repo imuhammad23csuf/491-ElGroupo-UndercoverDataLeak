@@ -1,8 +1,6 @@
--- HackTablet OS (StarterPlayerScripts)
--- ONLY the needed fixes applied:
--- 1) removed debug notifications/warns
--- 2) fixed re-open after Close by resetting started state
--- 3) fixed ObjectiveManager require path to Shared
+-- HackTablet OS (StarterPlayerScripts) - FULL CODE
+-- Simulation-only cybersecurity tablet for a fictional game streaming company
+-- Missions tab logic/UI/objective system left intact
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
@@ -34,14 +32,13 @@ local SAVE_KEYS = { "Obj_Admin", "TimesLeaked" }
 
 local isEquipped = false
 local started = false
+local lastEquipped = false
 
 local MainGUI, HintGUI
 local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel, MissionsFrame, MissionsList
 local BrowserStatusLabel, BrowserContent, LinkBar
 local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame
 local PacketPage, PacketToolbar, PacketListFrame, PacketIPBox, PacketDNSBox, PacketApplyBtn, PacketClearBtn, PacketFollowBtn
-
-local DEBUG = false
 
 local browserState = {
 	adminLoggedIn = false,
@@ -282,9 +279,6 @@ local function notify(t)
 	pcall(function()
 		StarterGui:SetCore("SendNotification", t)
 	end)
-end
-
-local function dbg(_msg)
 end
 
 local function mk(t, p)
@@ -2275,6 +2269,13 @@ local function buildMainUI()
 		started = false
 		stopAudio()
 		teardownStart()
+
+		if HintGUI then
+			HintGUI.Enabled = true
+		end
+
+		lastEquipped = false
+		bindEGuard()
 	end)
 
 	addLine(PROMPT)
@@ -2425,7 +2426,7 @@ local function allowE()
 	return isToolEquipped() and started and MainGUI and MainGUI.Enabled
 end
 
-local function bindEGuard()
+function bindEGuard()
 	CAS:UnbindAction(E_BIND)
 	CAS:BindActionAtPriority(E_BIND, function(_, state)
 		if state ~= Enum.UserInputState.Begin then
@@ -2582,7 +2583,6 @@ Player.CharacterAdded:Connect(function(char)
 	task.defer(scanForToolNow)
 end)
 
-local lastEquipped = false
 RunService.Heartbeat:Connect(function()
 	if not Tool then
 		scanForToolNow()
