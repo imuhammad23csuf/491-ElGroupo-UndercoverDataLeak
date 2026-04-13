@@ -42,6 +42,111 @@ local ScenarioData      = require(script.Parent.ScenarioData)
 
 local CyberScenarioManager = {}
 local activeSessions = {}   -- [UserId] = { scenarioId, currentStep, startTime, completedSteps }
+local completedScenarios = {} -- [UserId] = { [scenarioId] = true }
+
+local scenarioOrder = {
+    "Chapter1_Recon",
+    "Chapter2_SSH",
+    "Chapter3_Malware",
+    "Chapter4_IncidentResponse",
+}
+
+local function buildMissionObjectives(player)
+    local session = activeSessions[player.UserId]
+    local completed = completedScenarios[player.UserId] or {}
+    local objectivesList = {}
+
+    for index, scenarioId in ipairs(scenarioOrder) do
+        local scenario = ScenarioData[scenarioId]
+        if scenario then
+            local status = "Not Started"
+            local text = scenario.title
+            local unlocked = index == 1 or completed[scenarioOrder[index - 1]]
+
+            if not unlocked then
+                status = "Locked"
+                text = scenario.title .. " (Locked)"
+            elseif completed[scenarioId] then
+                status = "Completed"
+            elseif session and session.scenarioId == scenarioId then
+                status = "In Progress"
+                text = string.format("%s (Step %d/%d)", scenario.title, session.currentStep, #scenario.steps)
+            end
+
+            table.insert(objectivesList, {
+                id = "cyber_" .. scenarioId,
+                text = text,
+                status = status,
+            })
+        end
+    end
+
+    return objectivesList
+end
+
+local function buildChapterObjectives(player)
+    local session = activeSessions[player.UserId]
+    local completed = completedScenarios[player.UserId] or {}
+    local objectivesList = {}
+
+    for index, scenarioId in ipairs(scenarioOrder) do
+        local scenario = ScenarioData[scenarioId]
+        if scenario then
+            local unlocked = index == 1 or completed[scenarioOrder[index - 1]]
+            local status = "Not Started"
+
+            if not unlocked then
+                status = "Locked"
+            elseif completed[scenarioId] then
+                status = "Completed"
+            elseif session and session.scenarioId == scenarioId then
+                status = "In Progress"
+            end
+
+            local steps = {}
+            for stepIndex, step in ipairs(scenario.steps or {}) do
+                local stepStatus = "Not Started"
+
+                if not unlocked then
+                    stepStatus = "Locked"
+                elseif completed[scenarioId] then
+                    stepStatus = "Completed"
+                elseif session and session.scenarioId == scenarioId then
+                    if stepIndex < session.currentStep then
+                        stepStatus = "Completed"
+                    elseif stepIndex == session.currentStep then
+                        stepStatus = "In Progress"
+                    else
+                        stepStatus = "Not Started"
+                    end
+                end
+
+                table.insert(steps, {
+                    id = step.id or (scenarioId .. "_step" .. stepIndex),
+                    text = step.instruction or ("Step " .. stepIndex),
+                    status = stepStatus,
+                })
+            end
+
+            table.insert(objectivesList, {
+                id = scenarioId,
+                title = scenario.title,
+                text = scenario.title,
+                status = status,
+                unlocked = unlocked,
+                steps = steps,
+            })
+        end
+    end
+
+    return objectivesList
+end
+
+local function syncObjectives(player)
+    if player then
+        ObjectiveManager.SetPlayerObjectives(player, buildChapterObjectives(player), "ChapterObjectives")
+    end
+end
 
 -- ── Helpers ─────────────────────────────────────────────────────────
 
@@ -104,7 +209,9 @@ function CyberScenarioManager.LoadScenario(player, scenarioId)
         completedSteps  = {},
     }
 
+    completedScenarios[player.UserId] = completedScenarios[player.UserId] or {}
     local firstStep = scenario.steps[1]
+    syncObjectives(player)
 
     return {
         scenarioId          = scenarioId,
@@ -214,13 +321,7 @@ function CyberScenarioManager.CheckSolution(player, input)
         -- Advance to next step
         session.currentStep = session.currentStep + 1
         local nextStep = scenario.steps[session.currentStep]
-
-        pcall(function()
-            ObjectiveManager.SetPlayerObjectives(player, {
-                { id = "cyber_chapter", text = "[" .. session.scenarioId .. "]  Step " .. session.currentStep .. " of " .. #scenario.steps, status = "In Progress" },
-                { id = "cyber_task",    text = nextStep and nextStep.instruction or "Continue...", status = "In Progress" },
-            })
-        end)
+        syncObjectives(player)
 
         return {
             success          = true,
@@ -235,12 +336,14 @@ function CyberScenarioManager.CheckSolution(player, input)
         }
     else
         -- Chapter finished
-        pcall(function()
-            ObjectiveManager.SetPlayerObjectives(player, {
-                { id = "cyber_chapter", text = "[" .. session.scenarioId .. "]  COMPLETE", status = "Completed" },
-                { id = "cyber_task",    text = "All " .. #scenario.steps .. " steps finished.",  status = "Completed" },
-            })
-        end)
+        local completed = completedScenarios[player.UserId]
+        if not completed then
+            completed = {}
+            completedScenarios[player.UserId] = completed
+        end
+        completed[session.scenarioId] = true
+        activeSessions[player.UserId] = nil
+        syncObjectives(player)
 
         -- Chapter 1 involves unauthorized network access — add minor suspicion
         if session.scenarioId == "Chapter1_Recon" then
@@ -291,6 +394,11 @@ end
 --]]
 function CyberScenarioManager.Cleanup(player)
     activeSessions[player.UserId] = nil
+    syncObjectives(player)
+end
+
+function CyberScenarioManager.SyncObjectives(player)
+    syncObjectives(player)
 end
 
 
