@@ -1,5 +1,7 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DialogueData = require(script.Parent.DialogueData)
 local SuspicionManager = require(script.Parent.SuspicionManager)
+local IntegrityService = require(ReplicatedStorage.Shared.IntegrityService)
 
 local NarrativeManager = {}
 

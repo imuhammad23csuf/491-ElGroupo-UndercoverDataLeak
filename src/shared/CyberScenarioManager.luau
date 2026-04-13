@@ -150,9 +150,54 @@ end
 
 -- ── Helpers ─────────────────────────────────────────────────────────
 
+local function trim(s)
+    return tostring(s or ""):match("^%s*(.-)%s*$")
+end
+
 -- Strip leading/trailing whitespace and lowercase the entire string.
 local function normalize(s)
-    return (s:lower():match("^%s*(.-)%s*$"))
+    return trim(s):lower()
+end
+
+local function isStrongPasswordCommand(rawInput)
+    local input = trim(rawInput)
+    local password = input:match("^passwd%s+(.+)$")
+
+    if not password then
+        return false
+    end
+
+    return #password >= 12
+        and password:match("%d") ~= nil
+        and password:match("%l") ~= nil
+        and password:match("%u") ~= nil
+        and password:match("[%p%W_]") ~= nil
+end
+
+local function isPhishingAnalysisCommand(rawInput)
+    local input = normalize(rawInput)
+    local tool, message = input:match("^(%S+)%s+(.+)$")
+
+    if (tool ~= "baitcheck" and tool ~= "decoymail") or not message or message == "" then
+        return false
+    end
+
+    for _, keyword in ipairs({
+        "urgent",
+        "verify",
+        "reset",
+        "password",
+        "click",
+        "link",
+        "security",
+        "account",
+    }) do
+        if message:find(keyword, 1, true) then
+            return true
+        end
+    end
+
+    return false
 end
 
 --[[
@@ -166,6 +211,14 @@ end
       • Otherwise: exact match required.
 --]]
 local function commandMatches(rawInput, step)
+    if step.requiresStrongPassword then
+        return isStrongPasswordCommand(rawInput)
+    end
+
+    if step.requiresPhishingAnalysis then
+        return isPhishingAnalysisCommand(rawInput)
+    end
+
     local input = normalize(rawInput)
 
     for _, valid in ipairs(step.validCommands) do
@@ -276,7 +329,7 @@ function CyberScenarioManager.CheckSolution(player, input)
     end
 
     -- help typed during a non-help step — show current progress reminder
-    if normInput == "help" and step.id ~= "help" then
+    if normInput == "help" and not commandMatches(input, step) then
         return {
             success  = false,
             output   = table.concat({

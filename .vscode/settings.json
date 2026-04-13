@@ -1,6 +1,8 @@
 {
     "robloxLsp.diagnostics.globals": [
         "humanoid",
-        "humanoid"
+        "humanoid",
+        "handleCaught",
+        "PlayerIsInLabelledArea"
     ]
 }

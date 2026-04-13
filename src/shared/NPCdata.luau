@@ -9,7 +9,7 @@ local NPCdata = {
     },
 }
 
-return NPCdata
+do return NPCdata end
 local NPCdata = {
     ['Agent Ray' ] = {
         "So you're that hacker we hired for this huh?",
