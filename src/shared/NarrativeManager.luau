@@ -2,6 +2,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DialogueData = require(script.Parent.DialogueData)
 local SuspicionManager = require(script.Parent.SuspicionManager)
 local IntegrityService = require(ReplicatedStorage.Shared.IntegrityService)
+local StoryGateManager = require(script.Parent.StoryGateManager)
+
 
 local NarrativeManager = {}
 
@@ -110,6 +112,13 @@ function NarrativeManager.chooseOption(player, choiceIndex)
 
 	if not choice then
 		return nil, "Invalid choice"
+	end
+
+	if choice.requiredGate then
+		local unlocked = StoryGateManager.isUnlocked(player, choice.requiredGate)
+		if not unlocked then
+			return nil, "This path is locked based on your integrity"
+		end
 	end
 
 	if choice.integrity then
