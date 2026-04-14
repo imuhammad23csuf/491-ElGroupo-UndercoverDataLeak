@@ -20,6 +20,34 @@ pcall(function()
 end)
 
 local activePopup = nil
+local function getTitleScreenVisibilityRemote()
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotesFolder then
+		remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 5)
+	end
+
+	if not remotesFolder then
+		return nil
+	end
+
+	local remote = remotesFolder:FindFirstChild("SetTitleScreenVisible")
+	if not remote then
+		remote = remotesFolder:WaitForChild("SetTitleScreenVisible", 5)
+	end
+
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+
+	return nil
+end
+
+local function reportTitleScreenVisible(isVisible)
+	local remote = getTitleScreenVisibilityRemote()
+	if remote then
+		remote:FireServer(isVisible == true)
+	end
+end
 
 ---------------------------------------------------------
 -- COLOR & DESIGN TOKENS
@@ -582,6 +610,7 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder = 10
 screenGui.Parent = playerGui
+reportTitleScreenVisible(true)
 
 -- Background with gradient
 local bgFrame = createFrame({
@@ -1249,6 +1278,7 @@ screenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
 	else
 		globalBackBtn.Visible = true
 	end
+	reportTitleScreenVisible(screenGui.Enabled)
 end)
 
 -- Connect Menu button in MenuGui to show main menu

@@ -244,6 +244,11 @@ local function singleLine(text)
 end
 
 local function getSuggestedCommand(step)
+    local suggestedCommand = singleLine(step.suggestedCommand)
+    if suggestedCommand ~= "" then
+        return suggestedCommand
+    end
+
     if step.requiresStrongPassword then
         return "passwd NewStrongPass123!"
     end
@@ -535,6 +540,7 @@ function CyberScenarioManager.GetSessionInfo(player)
         scenarioId   = session.scenarioId,
         title        = scenario and scenario.title or "Unknown",
         currentStep  = session.currentStep,
+        stepId       = step and step.id or nil,
         totalSteps   = scenario and #scenario.steps or 0,
         instruction  = step and step.instruction or "Chapter complete.",
         hint         = step and step.hint or "",

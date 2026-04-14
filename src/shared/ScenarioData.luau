@@ -66,19 +66,18 @@ Type  help  to see available commands.
 [5] HTTPS 192.168.32.12 -> 192.168.43.20  dns=playerdata.bloxplay.local  port=443
 [*] Capture complete.
 [*] Suspicious outbound traffic to 203.44.18.77 detected.
-[*] Credentials observed in HTTP traffic: bloxplay-admin / blox123
+[*] Admin portal activity observed on bloxplay.com.
 ]],
         },
         {
             id          = "ch1_packets",
-            instruction = "Inspect the packet analyzer for the same workstation.",
-            hint        = "Open the packet tool against the same workstation you just investigated.",
-            validCommands = { "packets 192.168.32.12" },
+            instruction = "Use the browser packet analyzer and click Capture for the employee laptop.",
+            hint        = "Open the browser, visit RBXPacketNet.com, enter 192.168.32.12, then click Capture.",
+            suggestedCommand = "Open the browser, visit RBXPacketNet.com, enter 192.168.32.12, and click Capture.",
+            validCommands = { "browser_capture 192.168.32.12" },
             output      = [[
-[*] Packet Analyzer: Laptop (192.168.32.12) (sim)
-[*] Generated rows: 12
-[*] Notable: playerdata.bloxplay.local traffic found
-[*] Browser view available: visit RBXPacketNet.com
+[*] RBXPacketNet capture verified for Laptop (192.168.32.12).
+[*] Browser capture confirms PlayerData_Vault traffic for the employee workstation.
 ]],
         },
         {
@@ -102,53 +101,90 @@ Type  help  to see available commands.
 -- ════════════════════════════════════════════════════════════════════
 ScenarioData.Chapter2_SSH = {
     type      = "terminal",
-    title     = "Chapter 2: SSH and Log Analysis",
-    objective = "Access the PlayerData_Vault server and find evidence of the attacker.",
+    title     = "Chapter 2: File System Forensics",
+    objective = "Recover the vault credentials from a sticky note, SSH into the PlayerData_Vault, and inspect the filesystem for attacker evidence.",
     welcomeMessage = [[
-╔══════════════════════════════════════════════════╗
-║      HACKTABLET v2.4  —  FORENSICS MODE         ║
-║   Objective: Investigate PlayerData_Vault        ║
-╚══════════════════════════════════════════════════╝
-You found credentials in the packet capture:
-  bloxplay-admin / blox123
-The PlayerData_Vault sits deeper in the admin-side segment.
+HACKTABLET v2.4  -  FORENSICS MODE
+Objective: Recover credentials, inspect metadata, and trace evidence.
+
+Start in the browser and investigate the admin portal login page.
+Someone left a sticky note out in the open with a vault lead on it.
 ]],
     steps = {
         {
+            id          = "ch2_note",
+            instruction = "Find the sticky note on the admin portal page.",
+            hint        = "Open the browser, go to bloxplay.com/admin, and inspect the sticky note beside the login form.",
+            suggestedCommand = "Open the browser, visit bloxplay.com/admin, and inspect the sticky note.",
+            validCommands = { "browser_sticky_note inspect" },
+            output      = [[
+[*] Sticky note recovered:
+    Portal: bloxplay.com/admin
+    Username: bloxplay-admin
+    Password: blox123
+[*] Physical notes with credentials are a serious security risk.
+]],
+        },
+        {
             id          = "ch2_ssh",
-            instruction = "SSH into the PlayerData_Vault with the credentials you uncovered.",
-            hint        = "Use the admin credentials you uncovered against the vault host.",
+            instruction = "SSH into the PlayerData_Vault with the credentials from the sticky note.",
+            hint        = "Use the bloxplay-admin account against 192.168.43.20.",
             validCommands = { "ssh bloxplay-admin@192.168.43.20" },
             output      = [[
 [*] ssh: connecting to bloxplay-admin@192.168.43.20 ... (sim)
-[*] Using credentials previously observed in traffic capture (sim)
+[*] Using credentials recovered from the sticky note (sim)
 [*] Host key fingerprint verified (sim)
 [*] Password accepted (sim)
 [*] Welcome bloxplay-admin, connected to PlayerData_Vault
 ]],
         },
         {
-            id          = "ch2_ls",
-            instruction = "List files on the server root. Type: ls /",
-            hint        = "Take a quick look at the top level of the remote filesystem.",
-            validCommands = { "ls /", "ls" },
+            id          = "ch2_ls_root",
+            instruction = "List the server root with metadata. Type: ls -l /",
+            hint        = "Start by surveying the root directory in long-list form.",
+            validCommands = { "ls -l /", "ls / -l", "ls -l" },
             output      = [[
 [*] Listing / on PlayerData_Vault (sim)
-    home  var  etc  srv
-    auth.log  report.txt  sync_jobs.sh  player_profiles.db
+drwx------ bloxplay-admin vaultops   2 item(s)  home/
+drwxr-xr-x root           root       3 item(s)  var/
+drwxr-xr-x root           root       3 item(s)  etc/
+drwxr-x--- vaultsvc       vaultops   3 item(s)  srv/
+-rw-r----- root           secops     302 B      auth.log
+-rw-r----- bloxplay-admin vaultops   92 B       report.txt
+-rwxr-x--- vaultsvc       vaultops   117 B      sync_jobs.sh
 ]],
         },
         {
-            id          = "ch2_cat_auth",
-            instruction = "Read the authentication log. Type: cat auth.log",
-            hint        = "The authentication log is the shortest path to login evidence.",
-            validCommands = { "cat auth.log", "cat /auth.log" },
+            id          = "ch2_cd_srv",
+            instruction = "Move into the exported data directory. Type: cd /srv",
+            hint        = "The sensitive player exports live under the service data folder.",
+            validCommands = { "cd /srv", "cd srv" },
             output      = [[
---- auth.log ---
-2026-03-24 08:02:14 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77
-2026-03-24 08:02:27 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77
-2026-03-24 08:04:08 sshd[1322]: Accepted password for bloxplay-admin from 192.168.32.12
-2026-03-24 08:12:40 sshd[1941]: Failed login for backup from 203.44.18.77
+[*] Current directory: /srv
+[*] You are now inside the live export directory.
+]],
+        },
+        {
+            id          = "ch2_stat_profiles",
+            instruction = "Inspect the metadata for the profile export. Type: stat profiles.csv",
+            hint        = "Use the metadata command against the player profile export inside /srv.",
+            validCommands = { "stat profiles.csv", "stat /srv/profiles.csv" },
+            output      = [[
+[*] File: /srv/profiles.csv
+[*] Type: file
+[*] Owner: vaultsvc:vaultops
+[*] Access: -rw-r-----
+[*] Summary: Exported player profiles
+]],
+        },
+        {
+            id          = "ch2_cd_root",
+            instruction = "Return to the server root. Type: cd /",
+            hint        = "Head back to root so you can inspect the core evidence files there.",
+            validCommands = { "cd /", "cd .." },
+            output      = [[
+[*] Current directory: /
+[*] Returned to the root of PlayerData_Vault.
 ]],
         },
         {
@@ -157,6 +193,7 @@ The PlayerData_Vault sits deeper in the admin-side segment.
             hint        = "Search the auth log for unsuccessful sign-ins rather than reading every line manually.",
             validCommands = {
                 'grep "failed login" auth.log',
+                'grep "failed login" /auth.log',
                 "grep failed auth.log",
                 "grep failed login auth.log",
             },
@@ -166,6 +203,17 @@ The PlayerData_Vault sits deeper in the admin-side segment.
 2026-03-24 08:02:27 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77
 2026-03-24 08:12:40 sshd[1941]: Failed login for backup from 203.44.18.77
 [*] All failed attempts originate from 203.44.18.77
+]],
+        },
+        {
+            id          = "ch2_find",
+            instruction = "Search the filesystem for the suspicious sync script. Type: find / sync_jobs.sh",
+            hint        = "Use the file search tool from the root of the server to locate the suspicious artifact.",
+            validCommands = { "find / sync_jobs.sh", "find / sync_jobs" },
+            output      = [[
+[*] Matches for "sync_jobs.sh" under / (sim)
+ /sync_jobs.sh
+[*] Suspicious executable located at the server root.
 ]],
         },
         {
@@ -187,9 +235,6 @@ Server report (SIM)
     },
 }
 
--- ════════════════════════════════════════════════════════════════════
---  CHAPTER 3 — Malware Discovery and Network Tracing
--- ════════════════════════════════════════════════════════════════════
 ScenarioData.Chapter3_Malware = {
     type      = "terminal",
     title     = "Chapter 3: Malware Discovery",

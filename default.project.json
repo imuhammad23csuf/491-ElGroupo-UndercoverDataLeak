@@ -40,6 +40,7 @@
         "$className": "Part",
         "$properties": {
           "Anchored": true,
+          "Material": "Sand",
           "Color": [
             0.38823,
             0.37254,
