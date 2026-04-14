@@ -118,6 +118,10 @@ local function handleCaught(player)
 
 	showCaughtEvent:FireClient(player, true)
 	freezePlayer(player, true)
+	-- End mission timer with caught outcome
+	if _G.MissionTimer then
+		_G.MissionTimer.endMission(player, "caught")
+	end
 
 	task.wait(2)
 
