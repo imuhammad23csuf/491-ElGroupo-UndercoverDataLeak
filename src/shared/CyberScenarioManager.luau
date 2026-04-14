@@ -295,6 +295,37 @@ end
 
 -- ── Public API ───────────────────────────────────────────────────────
 
+local function cloneCompletedScenarios(source)
+    local out = {}
+
+    if type(source) ~= "table" then
+        return out
+    end
+
+    for scenarioId, completed in pairs(source) do
+        if completed then
+            out[scenarioId] = true
+        end
+    end
+
+    return out
+end
+
+local function buildCompletedStepsForScenario(scenario, currentStep)
+    local completedSteps = {}
+    local steps = scenario and scenario.steps or {}
+    local clampedStep = math.clamp(tonumber(currentStep) or 1, 1, math.max(#steps, 1))
+
+    for index = 1, clampedStep - 1 do
+        local step = steps[index]
+        if step and step.id then
+            table.insert(completedSteps, step.id)
+        end
+    end
+
+    return completedSteps
+end
+
 --[[
     LoadScenario
     Begins a new chapter session for the player.
@@ -513,6 +544,55 @@ function CyberScenarioManager.SyncObjectives(player)
     syncObjectives(player)
 end
 
+function CyberScenarioManager.ExportProgress(player)
+    if not player then
+        return {
+            activeSession = nil,
+            completedScenarios = {},
+        }
+    end
+
+    local session = activeSessions[player.UserId]
+
+    return {
+        activeSession = session and {
+            scenarioId = session.scenarioId,
+            currentStep = session.currentStep,
+            startTime = session.startTime,
+        } or nil,
+        completedScenarios = cloneCompletedScenarios(completedScenarios[player.UserId]),
+    }
+end
+
+function CyberScenarioManager.ImportProgress(player, progressData)
+    if not player then
+        return nil
+    end
+
+    progressData = type(progressData) == "table" and progressData or {}
+    completedScenarios[player.UserId] = cloneCompletedScenarios(progressData.completedScenarios)
+    activeSessions[player.UserId] = nil
+
+    local savedSession = progressData.activeSession
+    if type(savedSession) == "table" then
+        local scenarioId = tostring(savedSession.scenarioId or "")
+        local scenario = ScenarioData[scenarioId]
+
+        if scenario and type(scenario.steps) == "table" and #scenario.steps > 0 then
+            local currentStep = math.clamp(tonumber(savedSession.currentStep) or 1, 1, #scenario.steps)
+
+            activeSessions[player.UserId] = {
+                scenarioId = scenarioId,
+                currentStep = currentStep,
+                startTime = tonumber(savedSession.startTime) or os.time(),
+                completedSteps = buildCompletedStepsForScenario(scenario, currentStep),
+            }
+        end
+    end
+
+    syncObjectives(player)
+    return CyberScenarioManager.GetSessionInfo(player)
+end
 
 --[[
     hasActiveScenario

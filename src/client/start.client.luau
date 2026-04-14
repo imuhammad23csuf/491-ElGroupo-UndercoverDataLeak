@@ -5,9 +5,11 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local SoundService = game:GetService("SoundService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local TextService = game:GetService("TextService")
+local HttpService = game:GetService("HttpService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -20,34 +22,7 @@ pcall(function()
 end)
 
 local activePopup = nil
-local function getTitleScreenVisibilityRemote()
-	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
-	if not remotesFolder then
-		remotesFolder = ReplicatedStorage:WaitForChild("Remotes", 5)
-	end
-
-	if not remotesFolder then
-		return nil
-	end
-
-	local remote = remotesFolder:FindFirstChild("SetTitleScreenVisible")
-	if not remote then
-		remote = remotesFolder:WaitForChild("SetTitleScreenVisible", 5)
-	end
-
-	if remote and remote:IsA("RemoteEvent") then
-		return remote
-	end
-
-	return nil
-end
-
-local function reportTitleScreenVisible(isVisible)
-	local remote = getTitleScreenVisibilityRemote()
-	if remote then
-		remote:FireServer(isVisible == true)
-	end
-end
+local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
 
 ---------------------------------------------------------
 -- COLOR & DESIGN TOKENS
@@ -293,6 +268,16 @@ initializeAudioSettings()
 ---------------------------------------------------------
 -- HELPERS
 ---------------------------------------------------------
+local function notify(title, text, duration)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = tostring(title or "UNDERCOVER"),
+			Text = tostring(text or ""),
+			Duration = tonumber(duration) or 3,
+		})
+	end)
+end
+
 local function applyProperties(instance, props)
 	local parent = nil
 
@@ -610,7 +595,6 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.DisplayOrder = 10
 screenGui.Parent = playerGui
-reportTitleScreenVisible(true)
 
 -- Background with gradient
 local bgFrame = createFrame({
@@ -730,7 +714,7 @@ bodyLayout.Parent = body
 
 local buttonContainer = createFrame({
 	parent = body,
-	Size = UDim2.new(1, 0, 0, 220),
+	Size = UDim2.new(1, 0, 0, 274),
 	BackgroundTransparency = 1,
 	LayoutOrder = 1,
 })
@@ -758,6 +742,7 @@ local function createNavButton(text)
 end
 
 local startBtn = createNavButton("START MISSION")
+local loadProgressBtn = createNavButton("Load Saved Progress")
 local settingsBtn = createNavButton("SETTINGS")
 local chaptersBtn = createNavButton("CHAPTERS")
 local aboutBtn = createNavButton("ABOUT")
@@ -988,7 +973,7 @@ end
 ---------------------------------------------------------
 -- BUTTON EVENTS
 ---------------------------------------------------------
-startBtn.MouseButton1Click:Connect(function()
+local function startMissionFlow()
 	screenGui.Enabled = false
 	closePopup()
 
@@ -996,6 +981,47 @@ startBtn.MouseButton1Click:Connect(function()
 	if evt then
 		evt:FireServer()
 	end
+end
+
+startBtn.MouseButton1Click:Connect(startMissionFlow)
+
+loadProgressBtn.MouseButton1Click:Connect(function()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	local loadRemote = remotes and remotes:FindFirstChild("LoadSavedProgress")
+	if not loadRemote then
+		notify("UNDERCOVER", "Saved progress is unavailable right now.", 3)
+		return
+	end
+
+	local originalText = loadProgressBtn.Text
+	loadProgressBtn.Text = "Loading..."
+	loadProgressBtn.Active = false
+
+	local ok, result = pcall(function()
+		return loadRemote:InvokeServer()
+	end)
+
+	loadProgressBtn.Text = originalText
+	loadProgressBtn.Active = true
+
+	if not ok or type(result) ~= "table" or not result.success then
+		local message = type(result) == "table" and result.message or "Could not load saved progress."
+		notify("UNDERCOVER", message, 3)
+		return
+	end
+
+	if type(result.clientState) == "table" then
+		local encodedOk, encodedState = pcall(function()
+			return HttpService:JSONEncode(result.clientState)
+		end)
+		if encodedOk and type(encodedState) == "string" then
+			player:SetAttribute(RESTORE_STATE_ATTRIBUTE, encodedState)
+		end
+	end
+
+	closePopup()
+	screenGui.Enabled = false
+	notify("UNDERCOVER", tostring(result.message or "Saved progress loaded."), 3)
 end)
 
 ---------------------------------------------------------
@@ -1278,7 +1304,6 @@ screenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
 	else
 		globalBackBtn.Visible = true
 	end
-	reportTitleScreenVisible(screenGui.Enabled)
 end)
 
 -- Connect Menu button in MenuGui to show main menu

@@ -24,7 +24,8 @@ local PROMPT = "rbxplayer@hackos:~$ "
 local AUDIO_TAG = "HackTablet_Audio"
 local E_BIND = "HackTablet_E_Block"
 local BLUR_NAME = "HackStartBlur"
-local SAVE_KEYS = { "Obj_Admin", "TimesLeaked" }
+local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
+local SAVE_REMOTE_NAME = "SaveProgress"
 local isEquipped = false
 local started = false
 local lastEquipped = false
@@ -56,6 +57,9 @@ targetIP = "",
 targetLabel = "",
 rows = {},
 }
+local captureProgressState
+local applyProgressState
+local applyPendingRestoreState
 local function makePlayerRecord(i)
 local first = { "Aiden", "Nova", "Jules", "Mika", "Riley", "Zane", "Lena", "Kai", "Iris", "Noah", "Milo", "Ava" }
 local last = { "Stone", "Mercer", "Blaze", "Skylark", "Rift", "Vale", "Keen", "Pixel", "Byte", "Crest", "Ash", "Orbit" }
@@ -360,32 +364,27 @@ local function setEquipped(on)
 isEquipped = on
 Player:SetAttribute("HackTabletEquipped", on)
 end
+local function getRemote(name)
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+return nil
+end
+return remotes:FindFirstChild(name)
+end
 local function saveNow()
-local out = {}
-for _, k in ipairs(SAVE_KEYS) do
-local v = Player:GetAttribute(k)
-if v ~= nil then
-out[k] = v
-end
-end
-Player:SetAttribute("SaveBlob", Http:JSONEncode(out))
-notify({ Title = "HackTablet", Text = "Progress saved.", Duration = 2 })
-end
-local function loadNow()
-local raw = Player:GetAttribute("SaveBlob")
-if type(raw) ~= "string" or #raw == 0 then
+local saveRemote = getRemote(SAVE_REMOTE_NAME)
+if not saveRemote then
+notify({ Title = "HackTablet", Text = "Save service unavailable.", Duration = 3 })
 return
 end
-local ok, data = pcall(function()
-return Http:JSONDecode(raw)
+local ok, result = pcall(function()
+return saveRemote:InvokeServer(captureProgressState and captureProgressState() or nil)
 end)
-if not ok or type(data) ~= "table" then
+if not ok or type(result) ~= "table" or not result.success then
+notify({ Title = "HackTablet", Text = "Could not save progress.", Duration = 3 })
 return
 end
-for k, v in pairs(data) do
-Player:SetAttribute(k, v)
-end
-notify({ Title = "HackTablet", Text = "Progress loaded.", Duration = 2 })
+notify({ Title = "HackTablet", Text = tostring(result.message or "Progress saved."), Duration = 2 })
 end
 local function teardownStart()
 local blur = Lighting:FindFirstChild(BLUR_NAME)
@@ -865,6 +864,121 @@ showPacketPage(uNorm)
 return
 end
 showTextPage(PAGES[uNorm] or ('No renderer for "%s" (sim).'):format(url), "Page loaded (sim)")
+end
+captureProgressState = function()
+local openFiles = {}
+for pathName, isOpen in pairs(OpenFiles) do
+if isOpen then
+openFiles[#openFiles + 1] = tostring(pathName)
+end
+end
+table.sort(openFiles)
+local sniffCache = nil
+if type(terminalState.sniffCache) == "table" then
+sniffCache = {
+host = terminalState.sniffCache.host,
+ip = terminalState.sniffCache.ip,
+server = terminalState.sniffCache.server,
+attackerIP = terminalState.sniffCache.attackerIP,
+}
+end
+return {
+browserState = {
+adminLoggedIn = browserState.adminLoggedIn == true,
+currentUrl = tostring(browserState.currentUrl or "about:blank"),
+stickyNoteInspected = browserState.stickyNoteInspected == true,
+},
+terminalState = {
+currentHost = tostring(terminalState.currentHost or "local"),
+currentDir = tostring(terminalState.currentDir or "/"),
+connectedHost = terminalState.connectedHost,
+sshSession = terminalState.sshSession == true,
+scanCache = terminalState.scanCache,
+sniffCache = sniffCache,
+lastAttackerIP = tostring(terminalState.lastAttackerIP or "203.44.18.77"),
+},
+packetCapture = {
+targetIP = tostring(ActivePacketCapture.targetIP or ""),
+targetLabel = tostring(ActivePacketCapture.targetLabel or ""),
+},
+openFiles = openFiles,
+}
+end
+applyProgressState = function(state)
+if type(state) ~= "table" then
+return false
+end
+local browser = type(state.browserState) == "table" and state.browserState or {}
+local terminal = type(state.terminalState) == "table" and state.terminalState or {}
+local packetCapture = type(state.packetCapture) == "table" and state.packetCapture or {}
+local sniffCache = nil
+if type(terminal.sniffCache) == "table" then
+sniffCache = {
+host = terminal.sniffCache.host,
+ip = terminal.sniffCache.ip,
+server = terminal.sniffCache.server,
+attackerIP = terminal.sniffCache.attackerIP,
+}
+end
+browserState = {
+adminLoggedIn = browser.adminLoggedIn == true,
+currentUrl = type(browser.currentUrl) == "string" and browser.currentUrl or "about:blank",
+stickyNoteInspected = browser.stickyNoteInspected == true,
+}
+terminalState = {
+currentHost = type(terminal.currentHost) == "string" and terminal.currentHost or "local",
+currentDir = type(terminal.currentDir) == "string" and terminal.currentDir or "/",
+connectedHost = type(terminal.connectedHost) == "string" and terminal.connectedHost or nil,
+sshSession = terminal.sshSession == true,
+scanCache = type(terminal.scanCache) == "string" and terminal.scanCache or nil,
+sniffCache = sniffCache,
+lastAttackerIP = type(terminal.lastAttackerIP) == "string" and terminal.lastAttackerIP or "203.44.18.77",
+}
+ActivePacketCapture = {
+targetIP = type(packetCapture.targetIP) == "string" and packetCapture.targetIP or "",
+targetLabel = type(packetCapture.targetLabel) == "string" and packetCapture.targetLabel or "",
+rows = {},
+}
+if ActivePacketCapture.targetIP ~= "" then
+startPacketCaptureForIP(ActivePacketCapture.targetIP)
+end
+OpenFiles = {}
+if type(state.openFiles) == "table" then
+for _, pathName in ipairs(state.openFiles) do
+if type(pathName) == "string" and pathName ~= "" then
+OpenFiles[pathName] = true
+end
+end
+end
+if UrlBox then
+UrlBox.Text = browserState.currentUrl == "about:blank" and "" or browserState.currentUrl
+end
+if PacketIPBox then
+PacketIPBox.Text = ActivePacketCapture.targetIP
+end
+refreshAdminStickyNote()
+if PacketPage and PacketPage.Visible then
+populatePacketRows()
+end
+if BrowserFrame and BrowserFrame.Visible then
+navigateTo(browserState.currentUrl)
+end
+Player:SetAttribute("Obj_Admin", browserState.adminLoggedIn)
+return true
+end
+applyPendingRestoreState = function()
+local raw = Player:GetAttribute(RESTORE_STATE_ATTRIBUTE)
+if type(raw) ~= "string" or raw == "" then
+return false
+end
+Player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
+local ok, state = pcall(function()
+return Http:JSONDecode(raw)
+end)
+if not ok or type(state) ~= "table" then
+return false
+end
+return applyProgressState(state)
 end
 local function getHostKey()
 if terminalState.currentHost == "PlayerData_Vault" then
@@ -1484,7 +1598,8 @@ addLine("baitcheck <text> - detect phishing clues (sim)")
 addLine("decoymail <text> - inspect suspicious email tone (sim)")
 addLine("crack-ng <target> - password policy audit (sim)")
 addLine("admin <on|off> - toggle admin mode (sim)")
-addLine("save | load - save/load progress")
+addLine("save - save your mission progress")
+addLine("load - use Load Saved Progress on the start screen")
 addLine("clear - clear terminal")
 addLine("time - show time")
 addLine("Browser links: hackos://home, bloxplay.com/admin, RBXPacketNet.com")
@@ -1514,13 +1629,10 @@ currentDraft = ""
 if UrlBox then UrlBox.Text = "" end
 if BrowserFrame and BrowserFrame.Visible then navigateTo("about:blank") end
 Player:SetAttribute("Obj_Admin", false)
+applyPendingRestoreState()
 end
 local function getScenarioRemote(name)
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-return nil
-end
-return remotes:FindFirstChild(name)
+return getRemote(name)
 end
 local function syncScenarioProgress(raw, options)
 options = options or {}
@@ -1724,7 +1836,7 @@ addLine("Admin mode (sim) = " .. tostring(on))
 elseif cmd == "save" then
 saveNow()
 elseif cmd == "load" then
-loadNow()
+addLine("Use Load Saved Progress on the start screen.")
 elseif cmd == "time" then
 addLine(os.date("%Y-%m-%d %H:%M:%S"))
 elseif cmd == "clear" or cmd == "reset" then
@@ -1857,8 +1969,7 @@ end
 local bTerm = button("Terminal", 180, 80)
 local bBrowser = button("Browser", 265, 80)
 local bMissions = button("Missions", 350, 80)
-local bSave = button("Save", 435, 72)
-local bLoad = button("Load", 512, 72)
+local bSave = button("Save", 435, 149)
 local pad = mk("Frame", {
 Parent = desktop,
 Position = UDim2.new(0, 14, 0, 64),
@@ -2535,7 +2646,6 @@ BrowserFrame.Visible = false
 MissionsFrame.Visible = true
 end)
 bSave.MouseButton1Click:Connect(saveNow)
-bLoad.MouseButton1Click:Connect(loadNow)
 addLine(PROMPT)
 return gui
 end
@@ -3292,3 +3402,9 @@ end)
 if MainGUI then
 MainGUI:GetPropertyChangedSignal("Enabled"):Connect(bindEGuard)
 end
+Player:GetAttributeChangedSignal(RESTORE_STATE_ATTRIBUTE):Connect(function()
+applyPendingRestoreState()
+end)
+task.defer(function()
+applyPendingRestoreState()
+end)
