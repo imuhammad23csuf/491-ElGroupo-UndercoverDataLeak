@@ -1,4 +1,4 @@
---Suspicion Manager
+-- Suspicion Manager
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -73,6 +73,12 @@ local function pushToClient(player, newValue)
 	end
 end
 
+local function syncPlayerAttribute(player, newValue)
+	if player and player.Parent then
+		player:SetAttribute("Suspicion", clampNumber(newValue))
+	end
+end
+
 local function setServerSuspicion(player, newValue)
 	if not player then
 		return
@@ -80,6 +86,7 @@ local function setServerSuspicion(player, newValue)
 
 	local clamped = clampNumber(newValue)
 	serverSuspicionByUserId[player.UserId] = clamped
+	syncPlayerAttribute(player, clamped)
 	pushToClient(player, clamped)
 	bindable:Fire(clamped, player)
 end
@@ -91,6 +98,7 @@ local function applyServerDelta(player, delta)
 	local currentValue = getServerSuspicion(player)
 	local newValue = clampNumber(currentValue + delta)
 	serverSuspicionByUserId[player.UserId] = newValue
+	syncPlayerAttribute(player, newValue)
 	debugLog(("%s %+d -> %d"):format(player.Name, delta, newValue))
 	pushToClient(player, newValue)
 	bindable:Fire(newValue, player)
@@ -143,6 +151,56 @@ function SuspicionManager.Get(player)
 	end
 
 	return localSuspicion
+end
+
+function SuspicionManager.Set(value, player)
+	local clamped = clampNumber(value)
+	if RunService:IsServer() then
+		if player then
+			setServerSuspicion(player, clamped)
+		else
+			for _, candidate in ipairs(Players:GetPlayers()) do
+				setServerSuspicion(candidate, clamped)
+			end
+		end
+	else
+		local current = SuspicionManager.Get()
+		if clamped > current then
+			SuspicionManager.Add(clamped - current)
+		elseif clamped < current then
+			SuspicionManager.Reduce(current - clamped)
+		end
+	end
+end
+
+function SuspicionManager.GetSuspicion(player)
+	return SuspicionManager.Get(player)
+end
+
+local function applySignedSuspicion(amount, player)
+	local value = tonumber(amount) or 0
+	if value > 0 then
+		SuspicionManager.Add(value, player)
+	elseif value < 0 then
+		SuspicionManager.Reduce(-value, player)
+	end
+end
+
+function SuspicionManager.AddSuspicion(player, amount)
+	applySignedSuspicion(amount, player)
+end
+
+function SuspicionManager.addSuspicion(player, amount)
+	applySignedSuspicion(amount, player)
+end
+
+function SuspicionManager.ReduceSuspicion(player, amount)
+	local value = tonumber(amount) or 0
+	if value > 0 then
+		SuspicionManager.Reduce(value, player)
+	elseif value < 0 then
+		SuspicionManager.Add(-value, player)
+	end
 end
 
 if RunService:IsServer() then

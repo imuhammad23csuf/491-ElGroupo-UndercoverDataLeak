@@ -239,6 +239,55 @@ local function commandMatches(rawInput, step)
     return false
 end
 
+local function singleLine(text)
+    return trim(tostring(text or "")):gsub("%s*\n%s*", " ")
+end
+
+local function getSuggestedCommand(step)
+    if step.requiresStrongPassword then
+        return "passwd NewStrongPass123!"
+    end
+
+    if step.requiresPhishingAnalysis then
+        return 'baitcheck "URGENT verify your account now"'
+    end
+
+    local validCommands = step.validCommands
+    if type(validCommands) ~= "table" or #validCommands == 0 then
+        return nil
+    end
+
+    local example = singleLine(validCommands[1])
+    if example == "" then
+        return nil
+    end
+
+    return example
+end
+
+local function buildMistakePopup(step)
+    local lines = {
+        "Current objective: " .. singleLine(step.instruction or "Follow the active mission step."),
+    }
+
+    local hint = singleLine(step.hint)
+    if hint ~= "" then
+        table.insert(lines, "Hint: " .. hint)
+    end
+
+    local suggestedCommand = getSuggestedCommand(step)
+    if suggestedCommand then
+        table.insert(lines, "Try: " .. suggestedCommand)
+    end
+
+    return {
+        title = "HACKTABLET MISTAKE",
+        message = table.concat(lines, "\n"),
+        throttleKey = "tablet_step_" .. tostring(step.id or "unknown"),
+        throttleWindow = 2,
+    }
+end
+
 -- ── Public API ───────────────────────────────────────────────────────
 
 --[[
@@ -355,13 +404,18 @@ function CyberScenarioManager.CheckSolution(player, input)
 
     -- ── Evaluate command ────────────────────────────────────────
     if not commandMatches(input, step) then
+        local mistakePopup = buildMistakePopup(step)
         return {
-            success  = false,
-            output   = table.concat({
+            success             = false,
+            output              = table.concat({
                 "[!] Command not recognised or not the right command for this step.",
                 "[?] Hint: " .. (step.hint or "Try a different approach."),
             }, "\n"),
-            feedback = "Incorrect command — try again.",
+            feedback            = "Incorrect command - try again.",
+            popupTitle          = mistakePopup.title,
+            popupMessage        = mistakePopup.message,
+            popupThrottleKey    = mistakePopup.throttleKey,
+            popupThrottleWindow = mistakePopup.throttleWindow,
         }
     end
 

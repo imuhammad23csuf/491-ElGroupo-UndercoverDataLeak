@@ -5,6 +5,10 @@ local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CyberScenarioManager = require(Shared:WaitForChild("CyberScenarioManager"))
+local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
+local SuspicionManager = require(Shared:WaitForChild("SuspicionManager"))
+
+local MISTAKE_SUSPICION = 5
 
 local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotesFolder then
@@ -48,12 +52,32 @@ if not CleanupRemote then
 	CleanupRemote.Parent = remotesFolder
 end
 
+local function extractChapterNumber(scenarioId)
+	local chapterNumber = tostring(scenarioId or ""):match("Chapter(%d+)")
+	return tonumber(chapterNumber)
+end
+
 LoadScenarioRemote.OnServerInvoke = function(player, scenarioId)
-	return CyberScenarioManager.LoadScenario(player, scenarioId)
+	local result, err = CyberScenarioManager.LoadScenario(player, scenarioId)
+	local chapterNumber = extractChapterNumber(scenarioId)
+	if chapterNumber then
+		player:SetAttribute("CurrentChapter", chapterNumber)
+	end
+	return result, err
 end
 
 CheckSolutionRemote.OnServerInvoke = function(player, input)
-	return CyberScenarioManager.CheckSolution(player, input)
+	local result = CyberScenarioManager.CheckSolution(player, input)
+
+	if type(result) == "table" and result.popupTitle and result.popupMessage then
+		SuspicionManager.Add(MISTAKE_SUSPICION, player)
+		LessonManager.TriggerCustomPopup(player, result.popupTitle, result.popupMessage, {
+			throttleKey = result.popupThrottleKey,
+			throttleWindow = result.popupThrottleWindow,
+		})
+	end
+
+	return result
 end
 
 GetHintRemote.OnServerInvoke = function(player)

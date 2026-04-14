@@ -1,45 +1,128 @@
 local LessonManager = {}
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- 1. Find the exact same mailbox we built in Ticket 111
-local popupEvent = ReplicatedStorage:FindFirstChild("ShowEducationalPopup")
-if not popupEvent then
-	popupEvent = Instance.new("RemoteEvent")
-	popupEvent.Name = "ShowEducationalPopup"
-	popupEvent.Parent = ReplicatedStorage
+local popupCooldowns = {}
+
+local function ensureRemote(name)
+	local remote = ReplicatedStorage:FindFirstChild(name)
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = ReplicatedStorage
+	end
+	return remote
 end
 
--- 2. The Mapping System (The Library of Mistakes)
+local popupEvent = ensureRemote("ShowEducationalPopup")
+local notificationEvent = ensureRemote("ShowEducationalNotification")
+
 local lessonDatabase = {
-	["ClickedPhish"] = {
+	ClickedPhish = {
 		title = "PHISHING DETECTED",
-		message = "Always check the sender's email domain before clicking links. Hackers use urgent language to trick you into acting quickly."
+		message = "Always check the sender's email domain before clicking links. Hackers use urgent language to trick you into acting quickly.",
 	},
-	["StickyNotePassword"] = {
+	StickyNotePassword = {
 		title = "CREDENTIAL EXPOSURE",
-		message = "Never write passwords on sticky notes attached to your monitor. Physical security is just as important as digital security!"
+		message = "Never write passwords on sticky notes attached to your monitor. Physical security is just as important as digital security!",
 	},
-	["PublicWifiOpsec"] = {
+	PublicWifiOpsec = {
 		title = "OPSEC WARNING",
-		message = "Handling sensitive corporate tools in a public coffee shop exposes you to shoulder surfing and unsecured network snooping."
+		message = "Handling sensitive corporate tools in a public coffee shop exposes you to shoulder surfing and unsecured network snooping.",
 	},
-    ["CameraDetected"] = {
-        title = "SPOTTED BY CAMERA",
-        message = "Cameras leave a permanent digital audit trail. As a cybersecurity professional, you must minimize your digital footprint."
-    }
+	CameraDetected = {
+		title = "SPOTTED BY CAMERA",
+		message = "Cameras leave a permanent digital audit trail. As a cybersecurity professional, you must minimize your digital footprint.",
+	},
 }
 
--- 3. The Logic Script that "listens" and triggers the UI
-function LessonManager.TriggerMistake(player, mistakeId)
-	local lesson = lessonDatabase[mistakeId]
-	
-	if lesson then
-		-- Send the specific Title and Message to the player's UI
-		popupEvent:FireClient(player, lesson.title, lesson.message)
-		print("Sent lesson '" .. mistakeId .. "' to " .. player.Name)
-	else
-		warn("ERROR: Could not find an educational lesson for mistake: " .. tostring(mistakeId))
+local function shouldThrottlePopup(player, throttleKey, throttleWindow)
+	if not player or type(throttleKey) ~= "string" or throttleKey == "" then
+		return false
 	end
+
+	local window = tonumber(throttleWindow) or 0
+	if window <= 0 then
+		return false
+	end
+
+	local userId = player.UserId
+	local now = os.clock()
+	local playerCooldowns = popupCooldowns[userId]
+
+	if not playerCooldowns then
+		playerCooldowns = {}
+		popupCooldowns[userId] = playerCooldowns
+	end
+
+	local lastSentAt = playerCooldowns[throttleKey]
+	if lastSentAt and now - lastSentAt < window then
+		return true
+	end
+
+	playerCooldowns[throttleKey] = now
+	return false
 end
+
+local function sendPopup(player, title, message, options)
+	if not player then
+		return false
+	end
+
+	options = options or {}
+	if shouldThrottlePopup(player, options.throttleKey, options.throttleWindow) then
+		return false
+	end
+
+	popupEvent:FireClient(
+		player,
+		tostring(title or "SECURITY ALERT"),
+		tostring(message or "No lesson available.")
+	)
+
+	return true
+end
+
+local function sendNotification(player, title, message, options)
+	if not player then
+		return false
+	end
+
+	options = options or {}
+	if shouldThrottlePopup(player, options.throttleKey, options.throttleWindow) then
+		return false
+	end
+
+	notificationEvent:FireClient(
+		player,
+		tostring(title or "SECURITY ALERT"),
+		tostring(message or "No lesson available."),
+		tonumber(options.duration) or 4
+	)
+
+	return true
+end
+
+function LessonManager.TriggerMistake(player, mistakeId, options)
+	local lesson = lessonDatabase[mistakeId]
+	if not lesson then
+		warn("ERROR: Could not find an educational lesson for mistake: " .. tostring(mistakeId))
+		return false
+	end
+
+	return sendPopup(player, lesson.title, lesson.message, options)
+end
+
+function LessonManager.TriggerCustomPopup(player, title, message, options)
+	return sendPopup(player, title, message, options)
+end
+
+function LessonManager.TriggerNotification(player, title, message, options)
+	return sendNotification(player, title, message, options)
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	popupCooldowns[player.UserId] = nil
+end)
 
 return LessonManager

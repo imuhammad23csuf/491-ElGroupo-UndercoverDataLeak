@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local SuspicionManager = require(Shared:WaitForChild("SuspicionManager"))
@@ -21,31 +22,61 @@ end
 local handlingCaughtByUserId = {}
 
 local function resetGuards()
-	for _, obj in ipairs(workspace:GetDescendants()) do
-		if obj:IsA("Model") and obj.Name == "Guard" then
-			local startPart = obj:FindFirstChild("StartPoint")
-			if startPart and startPart:IsA("BasePart") then
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj:IsA("Model") then
+			local startPart = obj:FindFirstChild("StartPoint", true)
+			local humanoid = obj:FindFirstChildOfClass("Humanoid")
+			if startPart and startPart:IsA("BasePart") and humanoid then
 				obj:PivotTo(startPart.CFrame)
 			end
 		end
 	end
 end
 
-local function teleportPlayerToChapterStart(player)
+local function getSpawnCandidates(player)
+	local candidates = {}
+	local currentChapter = tonumber(player:GetAttribute("CurrentChapter")) or 1
+	local exactNames = {
+		("Chapter%dSpawn"):format(currentChapter),
+		("Chapter%dCheckpoint"):format(currentChapter),
+		"Checkpoint",
+	}
+
+	for _, targetName in ipairs(exactNames) do
+		local found = Workspace:FindFirstChild(targetName, true)
+		if found and found:IsA("BasePart") then
+			table.insert(candidates, found)
+		end
+	end
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if obj:IsA("SpawnLocation") then
+			table.insert(candidates, obj)
+		elseif obj:IsA("BasePart") then
+			local lowerName = obj.Name:lower()
+			if lowerName:find("spawn", 1, true) or lowerName:find("checkpoint", 1, true) then
+				table.insert(candidates, obj)
+			end
+		end
+	end
+
+	return candidates
+end
+
+local function teleportPlayerToCheckpoint(player)
 	local character = player.Character
 	if not character then
-		return
+		return false
 	end
 
-	local currentChapter = player:GetAttribute("CurrentChapter") or 1
-	local spawnName = "Chapter" .. tostring(currentChapter) .. "Spawn"
-	local spawnPart = workspace:FindFirstChild(spawnName)
-
-	if spawnPart and spawnPart:IsA("BasePart") then
-		character:PivotTo(spawnPart.CFrame + Vector3.new(0, 3, 0))
-	else
-		warn("No chapter spawn found for", spawnName)
+	for _, spawnPart in ipairs(getSpawnCandidates(player)) do
+		if spawnPart and spawnPart.Parent then
+			character:PivotTo(spawnPart.CFrame + Vector3.new(0, 3, 0))
+			return true
+		end
 	end
+
+	return false
 end
 
 local function freezePlayer(player, shouldFreeze)
@@ -62,20 +93,19 @@ local function freezePlayer(player, shouldFreeze)
 	if shouldFreeze then
 		humanoid.WalkSpeed = 0
 		humanoid.JumpPower = 0
+		humanoid.AutoRotate = false
 	else
 		humanoid.WalkSpeed = 16
 		humanoid.JumpPower = 50
+		humanoid.AutoRotate = true
 	end
 end
 
 local function resetSuspicion(player)
-	local current = SuspicionManager.Get(player)
-	if current > 0 then
-		SuspicionManager.Reduce(current, player)
-	end
+	SuspicionManager.Set(0, player)
 end
 
-local function teleportPlayerToCheckpoint(player)
+local function handleCaught(player)
 	if not player or not player.Parent then
 		return
 	end
@@ -92,9 +122,14 @@ local function teleportPlayerToCheckpoint(player)
 	task.wait(2)
 
 	resetGuards()
-	teleportPlayerToCheckpoint(player)
+	if not teleportPlayerToCheckpoint(player) then
+		pcall(function()
+			player:LoadCharacter()
+		end)
+	end
 	resetSuspicion(player)
 
+	task.wait(0.2)
 	freezePlayer(player, false)
 	showCaughtEvent:FireClient(player, false)
 

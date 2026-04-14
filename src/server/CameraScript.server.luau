@@ -3,12 +3,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
+local CameraMetadata = require(sharedRoot:WaitForChild("CameraMetadata"))
 local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
 
 local UPDATE_RATE = 0.1
 local PUSH_INTERVAL = 0.5
 local SUSPICION_TICK_RATE = 0.25
 local SUSPICION_PER_TICK = 2
+local CAMERA_NOTIFICATION_COOLDOWN = 12
 
 local DEFAULT_SWEEP_ANGLE = 60
 local DEFAULT_SWEEP_SPEED = 35
@@ -190,6 +193,22 @@ local function updateIndicator(state, player)
 	end
 end
 
+local function maybeNotifyCameraDetection(player, state)
+	if not player or not state then
+		return
+	end
+
+	local locationLabel = state.locationLabel or "Unknown Location"
+	LessonManager.TriggerNotification(player, "CAMERA ALERT", string.format(
+		"Seen on %s.",
+		locationLabel
+	), {
+		throttleKey = "camera_detected",
+		throttleWindow = CAMERA_NOTIFICATION_COOLDOWN,
+		duration = 3,
+	})
+end
+
 local ignoredInstances = getAllCameraModels()
 
 local rayParams = RaycastParams.new()
@@ -314,6 +333,7 @@ local function buildCameraState(model)
 		model = model,
 		basePart = basePart,
 		lookPart = lens,
+		locationLabel = CameraMetadata.GetLocationLabel(model),
 		movingParts = movingParts,
 		relativeOffsets = relativeOffsets,
 		rotationBaseCFrame = rotationBaseCFrame,
@@ -369,6 +389,7 @@ local function updateTracking(state, now, dt)
 	if canSeePlayer(state, root) and now >= state.nextSuspicionTick then
 		addPendingSuspicion(state.targetPlayer, SUSPICION_PER_TICK)
 		state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+		maybeNotifyCameraDetection(state.targetPlayer, state)
 	end
 
 	updateIndicator(state, state.targetPlayer)
@@ -418,6 +439,7 @@ while true do
 				if now >= state.nextSuspicionTick and canSeePlayer(state, root) then
 					addPendingSuspicion(player, SUSPICION_PER_TICK)
 					state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+					maybeNotifyCameraDetection(player, state)
 				end
 
 				updateIndicator(state, player)

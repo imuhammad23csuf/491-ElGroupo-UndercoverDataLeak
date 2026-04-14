@@ -1,10 +1,14 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local CameraMetadata = require(Shared:WaitForChild("CameraMetadata"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local gameCamera = workspace.CurrentCamera
+local gameCamera = Workspace.CurrentCamera
 
 local openEvent = ReplicatedStorage:WaitForChild("OpenCameraMonitor")
 
@@ -20,6 +24,7 @@ local cameraPoints = {}
 local screenGui
 local mainFrame
 local titleLabel
+local locationLabel
 local leftButton
 local rightButton
 local closeButton
@@ -38,28 +43,41 @@ player.CharacterAdded:Connect(refreshCharacter)
 local function collectCameras()
 	cameraPoints = {}
 
-	for _, obj in ipairs(workspace:GetDescendants()) do
+	for _, obj in ipairs(Workspace:GetDescendants()) do
 		if obj:IsA("Model") and obj.Name == "Camera" then
 			local lens = obj:FindFirstChild("Lens", true)
 
 			if lens and lens:IsA("BasePart") then
 				table.insert(cameraPoints, {
 					cameraModel = obj,
-					viewPart = lens
+					viewPart = lens,
+					location = CameraMetadata.GetLocationLabel(obj),
 				})
 			else
 				warn("[Monitor] No valid Lens found in", obj:GetFullName())
 			end
 		end
 	end
+
+	table.sort(cameraPoints, function(a, b)
+		if a.location == b.location then
+			return a.cameraModel:GetFullName() < b.cameraModel:GetFullName()
+		end
+
+		return a.location < b.location
+	end)
 end
 
-local function updateTitle()
+local function updateLabels()
 	if #cameraPoints == 0 then
 		titleLabel.Text = "NO CAMERAS"
-	else
-		titleLabel.Text = "CAMERA " .. currentIndex .. " / " .. #cameraPoints
+		locationLabel.Text = "LOCATION UNAVAILABLE"
+		return
 	end
+
+	local data = cameraPoints[currentIndex]
+	titleLabel.Text = "CAMERA " .. currentIndex .. " / " .. #cameraPoints
+	locationLabel.Text = string.upper((data and data.location) or "Unknown Location")
 end
 
 local function applyCurrentCamera()
@@ -70,7 +88,7 @@ local function applyCurrentCamera()
 
 	gameCamera.CameraType = Enum.CameraType.Scriptable
 	gameCamera.CFrame = data.viewPart.CFrame
-	updateTitle()
+	updateLabels()
 end
 
 local function nextCamera()
@@ -155,8 +173,8 @@ screenGui.Enabled = false
 screenGui.Parent = playerGui
 
 mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 420, 0, 110)
-mainFrame.Position = UDim2.new(0.5, -210, 1, -130)
+mainFrame.Size = UDim2.new(0, 420, 0, 132)
+mainFrame.Position = UDim2.new(0.5, -210, 1, -150)
 mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 mainFrame.BackgroundTransparency = 0.15
 mainFrame.BorderSizePixel = 0
@@ -172,9 +190,19 @@ titleLabel.TextScaled = true
 titleLabel.Font = Enum.Font.SourceSansBold
 titleLabel.Parent = mainFrame
 
+locationLabel = Instance.new("TextLabel")
+locationLabel.Size = UDim2.new(1, -120, 0, 22)
+locationLabel.Position = UDim2.new(0, 60, 0, 44)
+locationLabel.BackgroundTransparency = 1
+locationLabel.Text = "LOCATION"
+locationLabel.TextColor3 = Color3.fromRGB(180, 225, 255)
+locationLabel.TextScaled = true
+locationLabel.Font = Enum.Font.SourceSansSemibold
+locationLabel.Parent = mainFrame
+
 leftButton = Instance.new("TextButton")
 leftButton.Size = UDim2.new(0, 80, 0, 40)
-leftButton.Position = UDim2.new(0, 10, 0, 55)
+leftButton.Position = UDim2.new(0, 10, 0, 80)
 leftButton.Text = "<"
 leftButton.TextScaled = true
 leftButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
@@ -183,7 +211,7 @@ leftButton.Parent = mainFrame
 
 rightButton = Instance.new("TextButton")
 rightButton.Size = UDim2.new(0, 80, 0, 40)
-rightButton.Position = UDim2.new(1, -90, 0, 55)
+rightButton.Position = UDim2.new(1, -90, 0, 80)
 rightButton.Text = ">"
 rightButton.TextScaled = true
 rightButton.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
