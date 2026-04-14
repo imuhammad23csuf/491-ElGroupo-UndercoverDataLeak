@@ -47,11 +47,13 @@ local DialogueData = {
 					{
 						text = "Tell the truth.",
 						next = "goodEnding",
+						requiredGate = "WhistleblowerPath",
 						integrity = 10,
 					},
 					{
 						text = "Hide the evidence.",
 						next = "badEnding",
+						requiredGate = "CorporateSpyPath",
 						integrity = -20,
 					},
 				},
