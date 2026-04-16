@@ -7,7 +7,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local remotesFolder = ReplicatedStorage:WaitForChild("CaughtRemotes")
 local showCaughtEvent = remotesFolder:WaitForChild("ShowCaught")
-local CAUGHT_SOUND_ID = "rbxassetid://15641323951"
+local CAUGHT_SOUND_ID = "rbxassetid://6308606116"
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "CaughtOverlayGui"
@@ -46,7 +46,7 @@ subLabel.AnchorPoint = Vector2.new(0.5, 0.5)
 subLabel.Position = UDim2.fromScale(0.5, 0.6)
 subLabel.Size = UDim2.fromScale(0.4, 0.08)
 subLabel.BackgroundTransparency = 1
-subLabel.Text = "Mission Compromised Restarting Chapter..."
+subLabel.Text = "Busted. Rolling the scene back..."
 subLabel.TextScaled = true
 subLabel.Font = Enum.Font.GothamMedium
 subLabel.TextColor3 = Color3.fromRGB(2, 9, 108)
@@ -60,43 +60,17 @@ subTextConstraint.Parent = subLabel
 local caughtSound = Instance.new("Sound")
 caughtSound.Name = "CaughtOverlaySound"
 caughtSound.SoundId = CAUGHT_SOUND_ID
-caughtSound.Volume = 1
+caughtSound.Volume = 0.28
 caughtSound.Looped = false
 
 -- Chaotic randomness
-caughtSound.PlaybackSpeed = math.random(80, 140) / 100  -- 0.8x to 1.4x speed
+caughtSound.PlaybackSpeed = math.random(96, 108) / 100
 
 -- Optional: slight time offset for unpredictability
-caughtSound.TimePosition = math.random() * 0.05
+caughtSound.TimePosition = 0
 
 -- Parent it
 caughtSound.Parent = SoundService
-
--- === SOUND EFFECTS ===
-
--- Distortion (adds "crunchy chaos")
-local distortion = Instance.new("DistortionSoundEffect")
-distortion.Level = 0.4
-distortion.Parent = caughtSound
-
--- Echo (makes it feel ridiculous / exaggerated)
-local echo = Instance.new("EchoSoundEffect")
-echo.Delay = 0.1
-echo.Feedback = 0.5
-echo.WetLevel = 0.3
-echo.Parent = caughtSound
-
--- Pitch shifting (extra goofy tone)
-local pitch = Instance.new("PitchShiftSoundEffect")
-pitch.Octave = math.random(80, 120) / 100 -- slight random pitch shift
-pitch.Parent = caughtSound
-
--- Reverb (adds space / absurdity)
-local reverb = Instance.new("ReverbSoundEffect")
-reverb.DecayTime = 1.5
-reverb.Density = 0.7
-reverb.WetLevel = 0.3
-reverb.Parent = caughtSound
 
 
 showCaughtEvent.OnClientEvent:Connect(function(isVisible)
