@@ -23,6 +23,10 @@ end)
 
 local activePopup = nil
 local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
+local LOAD_REMOTE_NAME = "LoadSavedProgress"
+local SAVE_STATUS_REMOTE_NAME = "GetSavedProgressStatus"
+local CLEAR_SAVE_REMOTE_NAME = "ClearSavedProgress"
+local START_OVER_REMOTE_NAME = "StartOverProgress"
 
 ---------------------------------------------------------
 -- COLOR & DESIGN TOKENS
@@ -742,10 +746,51 @@ local function createNavButton(text)
 end
 
 local startBtn = createNavButton("START MISSION")
-local loadProgressBtn = createNavButton("Load Saved Progress")
+local loadProgressBtn = createNavButton("CONTINUE")
 local settingsBtn = createNavButton("SETTINGS")
 local chaptersBtn = createNavButton("CHAPTERS")
 local aboutBtn = createNavButton("ABOUT")
+
+local function getRemotesFolder()
+	return ReplicatedStorage:FindFirstChild("Remotes")
+end
+
+local function getRemoteFunction(name)
+	local remotes = getRemotesFolder()
+	local remote = remotes and remotes:FindFirstChild(name)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote
+	end
+	return nil
+end
+
+local function setContinueButtonState(hasSave)
+	local available = hasSave == true
+	loadProgressBtn:SetAttribute("HasSavedProgress", available)
+	loadProgressBtn.Text = available and "CONTINUE" or "NO SAVE FOUND"
+	loadProgressBtn.Active = available
+	loadProgressBtn.Selectable = available
+	loadProgressBtn.BackgroundColor3 = available and COLORS.PRIMARY or COLORS.DISABLED
+	loadProgressBtn.TextColor3 = available and COLORS.DARK_BG or COLORS.TEXT_SECONDARY
+end
+
+local function refreshContinueButtonState()
+	local statusRemote = getRemoteFunction(SAVE_STATUS_REMOTE_NAME)
+	if not statusRemote then
+		setContinueButtonState(true)
+		return
+	end
+
+	local ok, result = pcall(function()
+		return statusRemote:InvokeServer()
+	end)
+
+	if ok and type(result) == "table" then
+		setContinueButtonState(result.hasSave == true)
+	else
+		setContinueButtonState(true)
+	end
+end
 
 ---------------------------------------------------------
 -- CYBERSECURITY FACT TICKER
@@ -973,9 +1018,37 @@ end
 ---------------------------------------------------------
 -- BUTTON EVENTS
 ---------------------------------------------------------
+local function getChapterPopupData()
+	local objectiveChapters = ObjectiveManager and ObjectiveManager.Get("ChapterObjectives") or nil
+	if type(objectiveChapters) == "table" and #objectiveChapters > 0 then
+		local chapters = {}
+		for index, chapter in ipairs(objectiveChapters) do
+			if type(chapter) == "table" then
+				chapters[#chapters + 1] = {
+					name = tostring(chapter.title or chapter.text or ("Chapter " .. index)),
+					number = index,
+					locked = chapter.unlocked == false or tostring(chapter.status or "") == "Locked",
+					status = tostring(chapter.status or "Not Started"),
+				}
+			end
+		end
+		if #chapters > 0 then
+			return chapters
+		end
+	end
+
+	return {
+		{ name = "Chapter 1: Active Reconnaissance", number = 1, locked = false, status = "In Progress" },
+		{ name = "Chapter 2: File System Forensics", number = 2, locked = true, status = "Locked" },
+		{ name = "Chapter 3: Malware Discovery", number = 3, locked = true, status = "Locked" },
+		{ name = "Chapter 4: Incident Response", number = 4, locked = true, status = "Locked" },
+	}
+end
+
 local function startMissionFlow()
 	screenGui.Enabled = false
 	closePopup()
+	notify("UNDERCOVER", "Check your tablet for instructions.", 3)
 
 	local evt = ReplicatedStorage:FindFirstChild("StartNewsCutscene")
 	if evt then
@@ -986,29 +1059,35 @@ end
 startBtn.MouseButton1Click:Connect(startMissionFlow)
 
 loadProgressBtn.MouseButton1Click:Connect(function()
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	local loadRemote = remotes and remotes:FindFirstChild("LoadSavedProgress")
+	if loadProgressBtn:GetAttribute("HasSavedProgress") == false then
+		notify("UNDERCOVER", "No saved progress found.", 3)
+		return
+	end
+
+	local loadRemote = getRemoteFunction(LOAD_REMOTE_NAME)
 	if not loadRemote then
-		notify("UNDERCOVER", "Saved progress is unavailable right now.", 3)
+		notify("UNDERCOVER", "Continue is unavailable right now.", 3)
 		return
 	end
 
 	local originalText = loadProgressBtn.Text
-	loadProgressBtn.Text = "Loading..."
+	loadProgressBtn.Text = "Continuing..."
 	loadProgressBtn.Active = false
+	loadProgressBtn.Selectable = false
 
 	local ok, result = pcall(function()
 		return loadRemote:InvokeServer()
 	end)
 
-	loadProgressBtn.Text = originalText
-	loadProgressBtn.Active = true
-
 	if not ok or type(result) ~= "table" or not result.success then
-		local message = type(result) == "table" and result.message or "Could not load saved progress."
+		local message = type(result) == "table" and result.message or "Could not continue from your autosave."
+		refreshContinueButtonState()
 		notify("UNDERCOVER", message, 3)
 		return
 	end
+
+	setContinueButtonState(true)
+	loadProgressBtn.Text = originalText
 
 	if type(result.clientState) == "table" then
 		local encodedOk, encodedState = pcall(function()
@@ -1021,8 +1100,10 @@ loadProgressBtn.MouseButton1Click:Connect(function()
 
 	closePopup()
 	screenGui.Enabled = false
-	notify("UNDERCOVER", tostring(result.message or "Saved progress loaded."), 3)
+	notify("UNDERCOVER", tostring(result.message or "Continuing from autosave."), 3)
 end)
+
+task.defer(refreshContinueButtonState)
 
 ---------------------------------------------------------
 -- POPUP: SETTINGS
@@ -1042,6 +1123,78 @@ settingsBtn.MouseButton1Click:Connect(function()
 		createStepVolumeControl(scrollFrame, "SFX Volume", sfxVolumePercent, function(value)
 			writePercentAttribute(SFX_VOLUME_ATTRIBUTE, value)
 		end, 2)
+
+		createLabel({
+			parent = scrollFrame,
+			Text = "PROGRESS",
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundTransparency = 1,
+			TextColor3 = COLORS.TEXT_PRIMARY,
+			Font = Enum.Font.GothamBold,
+			TextSize = 16,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			LayoutOrder = 3,
+			ZIndex = 90,
+		})
+
+		createLabel({
+			parent = scrollFrame,
+			Text = "Delete your autosave and begin again from the opening mission.",
+			Size = UDim2.new(1, 0, 0, 42),
+			BackgroundTransparency = 1,
+			TextColor3 = COLORS.TEXT_SECONDARY,
+			Font = Enum.Font.Gotham,
+			TextSize = 13,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			LayoutOrder = 4,
+			ZIndex = 90,
+		})
+
+		local startOverBtn = createButton({
+			parent = scrollFrame,
+			Text = "START OVER",
+			Size = UDim2.new(1, 0, 0, 42),
+			BackgroundColor3 = COLORS.DANGER,
+			BorderSizePixel = 0,
+			TextColor3 = COLORS.TEXT_PRIMARY,
+			Font = Enum.Font.GothamSemibold,
+			TextSize = 15,
+			AutoButtonColor = false,
+			LayoutOrder = 5,
+			ZIndex = 90,
+		})
+		roundCorners(startOverBtn, 12)
+		animateButtonHover(startOverBtn, COLORS.DANGER, Color3.fromRGB(220, 38, 38))
+		startOverBtn.MouseButton1Click:Connect(function()
+			local startOverRemote = getRemoteFunction(START_OVER_REMOTE_NAME)
+			if not startOverRemote then
+				notify("UNDERCOVER", "Start Over is unavailable right now.", 3)
+				return
+			end
+
+			startOverBtn.Text = "Starting Over..."
+			startOverBtn.Active = false
+			startOverBtn.Selectable = false
+
+			local okReset, resetResult = pcall(function()
+				return startOverRemote:InvokeServer()
+			end)
+
+			startOverBtn.Text = "START OVER"
+			startOverBtn.Active = true
+			startOverBtn.Selectable = true
+
+			if not okReset or type(resetResult) ~= "table" or not resetResult.success then
+				notify("UNDERCOVER", type(resetResult) == "table" and tostring(resetResult.message or "Could not start over.") or "Could not start over.", 3)
+				return
+			end
+
+			player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
+			refreshContinueButtonState()
+			startMissionFlow()
+		end)
 	end)
 
 	if not ok then
@@ -1057,12 +1210,7 @@ chaptersBtn.MouseButton1Click:Connect(function()
 	local _, contentArea = createPopupPanel("CHAPTERS", UDim2.new(0, 480, 0, 550))
 	local scrollFrame = makeScrollingFrame(contentArea)
 
-	local chapters = {
-		{ name = "Chapter 1: Infiltration", number = 1, locked = false },
-		{ name = "Chapter 2: Investigation", number = 2, locked = true },
-		{ name = "Chapter 3: Discovery", number = 3, locked = true },
-		{ name = "Chapter 4: Confrontation", number = 4, locked = true },
-	}
+	local chapters = getChapterPopupData()
 
 	for _, chapterData in ipairs(chapters) do
 		local chapterBtn = createButton({
@@ -1124,15 +1272,23 @@ chaptersBtn.MouseButton1Click:Connect(function()
 
 			animateButtonHover(chapterBtn, COLORS.PRIMARY, COLORS.ACCENT)
 
-			chapterBtn.MouseButton1Click:Connect(function()
-				print("Starting " .. chapterData.name)
-				closePopup()
-				screenGui.Enabled = false
+			local statusText = tostring(chapterData.status or "Ready")
+			createLabel({
+				parent = chapterBtn,
+				Text = string.upper(statusText == "Not Started" and "READY" or statusText),
+				Size = UDim2.new(0, 96, 0, 28),
+				Position = UDim2.new(1, -112, 0.5, -14),
+				BackgroundTransparency = 1,
+				TextColor3 = statusText == "Completed" and COLORS.SUCCESS or (statusText == "In Progress" and COLORS.WARNING or COLORS.DARK_BG),
+				Font = Enum.Font.GothamBlack,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				TextYAlignment = Enum.TextYAlignment.Center,
+				ZIndex = 86,
+			})
 
-				local evt = ReplicatedStorage:FindFirstChild("StartNewsCutscene")
-				if evt then
-					evt:FireServer()
-				end
+			chapterBtn.MouseButton1Click:Connect(function()
+				startMissionFlow()
 			end)
 		end
 	end
