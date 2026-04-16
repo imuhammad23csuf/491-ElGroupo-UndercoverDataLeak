@@ -41,7 +41,7 @@ local SuspicionManager  = require(script.Parent.SuspicionManager)
 local ScenarioData      = require(script.Parent.ScenarioData)
 
 local CyberScenarioManager = {}
-local activeSessions = {}   -- [UserId] = { scenarioId, currentStep, startTime, completedSteps }
+local activeSessions = {}   -- [UserId] = { scenarioId, currentStep, startTime, completedSteps, stepState }
 local completedScenarios = {} -- [UserId] = { [scenarioId] = true }
 
 local scenarioOrder = {
@@ -62,7 +62,6 @@ local function buildMissionObjectives(player)
             local status = "Not Started"
             local text = scenario.title
             local unlocked = index == 1 or completed[scenarioOrder[index - 1]]
-
             if not unlocked then
                 status = "Locked"
                 text = scenario.title .. " (Locked)"
@@ -326,6 +325,216 @@ local function buildCompletedStepsForScenario(scenario, currentStep)
     return completedSteps
 end
 
+
+local function deepCopy(value)
+    if type(value) ~= "table" then
+        return value
+    end
+
+    local copy = {}
+    for key, nestedValue in pairs(value) do
+        copy[key] = deepCopy(nestedValue)
+    end
+
+    return copy
+end
+
+local function ensureStepState(session, stepId)
+    session.stepState = session.stepState or {}
+
+    if type(session.stepState[stepId]) ~= "table" then
+        session.stepState[stepId] = {}
+    end
+
+    return session.stepState[stepId]
+end
+
+local function getMailEntryById(scenario, emailId)
+    local mailInbox = scenario and scenario.mailInbox
+    if type(mailInbox) ~= "table" then
+        return nil
+    end
+
+    for _, entry in ipairs(mailInbox) do
+        if type(entry) == "table" and tostring(entry.id) == tostring(emailId) then
+            return entry
+        end
+    end
+
+    return nil
+end
+
+local function countResolvedEntries(resolvedMap)
+    local count = 0
+
+    for _, resolved in pairs(resolvedMap or {}) do
+        if resolved then
+            count += 1
+        end
+    end
+
+    return count
+end
+
+local function completeStep(player, session, scenario, step)
+    table.insert(session.completedSteps, step.id)
+
+    local isLast = step.isLastStep == true
+
+    if not isLast then
+        session.currentStep = session.currentStep + 1
+        local nextStep = scenario.steps[session.currentStep]
+        syncObjectives(player)
+
+        return {
+            success = true,
+            output = step.output,
+            stepComplete = true,
+            chapterComplete = false,
+            nextInstruction = nextStep and nextStep.instruction or nil,
+            nextHint = nextStep and nextStep.hint or nil,
+            stepIndex = session.currentStep,
+            totalSteps = #scenario.steps,
+            feedback = "Step complete!",
+        }
+    end
+
+    local completed = completedScenarios[player.UserId]
+    if not completed then
+        completed = {}
+        completedScenarios[player.UserId] = completed
+    end
+    completed[session.scenarioId] = true
+    activeSessions[player.UserId] = nil
+    syncObjectives(player)
+
+    if session.scenarioId == "Chapter1_Recon" then
+        pcall(function()
+            SuspicionManager.AddSuspicion(player, 10)
+        end)
+    end
+
+    return {
+        success = true,
+        output = step.output,
+        stepComplete = true,
+        chapterComplete = true,
+        feedback = "Chapter complete!",
+        completedScenarioId = session.scenarioId,
+        totalSteps = #scenario.steps,
+        stepIndex = session.currentStep,
+    }
+end
+
+local function handleMailTriageStep(player, session, scenario, step, rawInput)
+    local input = normalize(rawInput)
+    local emailId, action = input:match("^browser_mail%s+([%w_%-]+)%s+(report|pass)$")
+
+    if not emailId or not action then
+        local mistakePopup = buildMistakePopup(step)
+        return {
+            success = false,
+            output = table.concat({
+                "[!] Use the Report or Pass Through buttons inside BloxMail to classify each message.",
+                "[?] Hint: " .. (step.hint or "Review the active inbox queue."),
+            }, string.char(10)),
+            feedback = "Incorrect command - try again.",
+            popupTitle = mistakePopup.title,
+            popupMessage = mistakePopup.message,
+            popupThrottleKey = mistakePopup.throttleKey,
+            popupThrottleWindow = mistakePopup.throttleWindow,
+        }
+    end
+
+    local emailEntry = getMailEntryById(scenario, emailId)
+    if not emailEntry then
+        return {
+            success = false,
+            output = "[!] That inbox message is not part of the active Chapter 3 queue.",
+            feedback = "Unknown inbox message.",
+        }
+    end
+
+    local stepState = ensureStepState(session, step.id)
+    stepState.resolved = stepState.resolved or {}
+    stepState.actions = stepState.actions or {}
+    stepState.penalized = stepState.penalized or {}
+
+    if stepState.resolved[emailId] == true then
+        return {
+            success = true,
+            output = ('[*] "%s" is already classified.'):format(tostring(emailEntry.subject or emailId)),
+            feedback = "Message already handled.",
+            stepComplete = false,
+            chapterComplete = false,
+            stepIndex = session.currentStep,
+            totalSteps = #scenario.steps,
+        }
+    end
+
+    local expectedAction = normalize(emailEntry.expectedAction)
+    if expectedAction ~= "report" and expectedAction ~= "pass" then
+        expectedAction = "report"
+    end
+
+    if action == expectedAction then
+        stepState.resolved[emailId] = true
+        stepState.actions[emailId] = action
+
+        local totalEmails = #((scenario and scenario.mailInbox) or {})
+        local resolvedCount = countResolvedEntries(stepState.resolved)
+
+        if totalEmails > 0 and resolvedCount >= totalEmails then
+            return completeStep(player, session, scenario, step)
+        end
+
+        return {
+            success = true,
+            output = ('[*] "%s" classified as %s.'):format(
+                tostring(emailEntry.subject or emailId),
+                action == "report" and "REPORT" or "PASS THROUGH"
+            ) .. string.char(10) .. ("[*] Inbox triage progress: %d/%d complete."):format(
+                resolvedCount,
+                totalEmails
+            ),
+            feedback = ("Inbox triage progress: %d/%d"):format(resolvedCount, totalEmails),
+            stepComplete = false,
+            chapterComplete = false,
+            stepIndex = session.currentStep,
+            totalSteps = #scenario.steps,
+        }
+    end
+
+    local penaltyKey = ("%s:%s"):format(emailId, action)
+    if not stepState.penalized[penaltyKey] then
+        stepState.penalized[penaltyKey] = true
+        local mistakePopup = buildMistakePopup(step)
+
+        return {
+            success = false,
+            output = ('[!] "%s" should not be marked %s.'):format(
+                tostring(emailEntry.subject or emailId),
+                action == "report" and "REPORT" or "PASS THROUGH"
+            ) .. string.char(10) .. "[?] Review the sender, urgency, and request before deciding again.",
+            feedback = "Incorrect classification - review the message again.",
+            popupTitle = mistakePopup.title,
+            popupMessage = mistakePopup.message,
+            popupThrottleKey = mistakePopup.throttleKey .. "_mail_" .. penaltyKey,
+            popupThrottleWindow = mistakePopup.throttleWindow,
+        }
+    end
+
+    return {
+        success = false,
+        output = ('[!] "%s" is still unresolved. Review it again before choosing.'):format(tostring(emailEntry.subject or emailId)),
+        feedback = "Message still pending.",
+        stepComplete = false,
+        chapterComplete = false,
+        stepIndex = session.currentStep,
+        totalSteps = #scenario.steps,
+    }
+end
+
 --[[
     LoadScenario
     Begins a new chapter session for the player.
@@ -345,6 +554,7 @@ function CyberScenarioManager.LoadScenario(player, scenarioId)
         currentStep     = 1,
         startTime       = os.time(),
         completedSteps  = {},
+        stepState       = {},
     }
 
     completedScenarios[player.UserId] = completedScenarios[player.UserId] or {}
@@ -438,6 +648,10 @@ function CyberScenarioManager.CheckSolution(player, input)
         }
     end
 
+    if step.id == "ch3_inbox_triage" then
+        return handleMailTriageStep(player, session, scenario, step, input)
+    end
+
     -- ── Evaluate command ────────────────────────────────────────
     if not commandMatches(input, step) then
         local mistakePopup = buildMistakePopup(step)
@@ -455,57 +669,8 @@ function CyberScenarioManager.CheckSolution(player, input)
         }
     end
 
-    -- ── Correct command ─────────────────────────────────────────
-    table.insert(session.completedSteps, step.id)
-
-    local isLast = step.isLastStep == true
-
-    if not isLast then
-        -- Advance to next step
-        session.currentStep = session.currentStep + 1
-        local nextStep = scenario.steps[session.currentStep]
-        syncObjectives(player)
-
-        return {
-            success          = true,
-            output           = step.output,
-            stepComplete     = true,
-            chapterComplete  = false,
-            nextInstruction  = nextStep and nextStep.instruction or nil,
-            nextHint         = nextStep and nextStep.hint or nil,
-            stepIndex        = session.currentStep,
-            totalSteps       = #scenario.steps,
-            feedback         = "Step complete!",
-        }
-    else
-        -- Chapter finished
-        local completed = completedScenarios[player.UserId]
-        if not completed then
-            completed = {}
-            completedScenarios[player.UserId] = completed
-        end
-        completed[session.scenarioId] = true
-        activeSessions[player.UserId] = nil
-        syncObjectives(player)
-
-        -- Chapter 1 involves unauthorized network access — add minor suspicion
-        if session.scenarioId == "Chapter1_Recon" then
-            pcall(function()
-                SuspicionManager.AddSuspicion(player, 10)
-            end)
-        end
-
-        return {
-            success             = true,
-            output              = step.output,
-            stepComplete        = true,
-            chapterComplete     = true,
-            feedback            = "Chapter complete!",
-            completedScenarioId = session.scenarioId,
-            totalSteps          = #scenario.steps,
-            stepIndex           = session.currentStep,
-        }
-    end
+    -- ?? Correct command ?????????????????????????????????????????
+    return completeStep(player, session, scenario, step)
 end
 
 
@@ -540,6 +705,16 @@ function CyberScenarioManager.Cleanup(player)
     syncObjectives(player)
 end
 
+function CyberScenarioManager.ResetProgress(player)
+    if not player then
+        return
+    end
+
+    activeSessions[player.UserId] = nil
+    completedScenarios[player.UserId] = {}
+    syncObjectives(player)
+end
+
 function CyberScenarioManager.SyncObjectives(player)
     syncObjectives(player)
 end
@@ -559,6 +734,7 @@ function CyberScenarioManager.ExportProgress(player)
             scenarioId = session.scenarioId,
             currentStep = session.currentStep,
             startTime = session.startTime,
+            stepState = deepCopy(session.stepState),
         } or nil,
         completedScenarios = cloneCompletedScenarios(completedScenarios[player.UserId]),
     }
@@ -586,6 +762,7 @@ function CyberScenarioManager.ImportProgress(player, progressData)
                 currentStep = currentStep,
                 startTime = tonumber(savedSession.startTime) or os.time(),
                 completedSteps = buildCompletedStepsForScenario(scenario, currentStep),
+                stepState = deepCopy(savedSession.stepState),
             }
         end
     end
@@ -625,6 +802,7 @@ function CyberScenarioManager.GetSessionInfo(player)
         instruction  = step and step.instruction or "Chapter complete.",
         hint         = step and step.hint or "",
         elapsedTime  = os.time() - session.startTime,
+        stepState    = deepCopy(session.stepState),
     }
 end
 
