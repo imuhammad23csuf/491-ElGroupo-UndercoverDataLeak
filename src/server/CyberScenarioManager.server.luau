@@ -14,11 +14,24 @@ local PROGRESS_STORE = DataStoreService:GetDataStore("PlayerProgress_v1")
 local SAVE_ATTRIBUTE_KEYS = {
     "CurrentChapter",
     "Obj_Admin",
+    "RecoveredAdminCredentials",
     "TimesLeaked",
     "HasKeycardData",
     "UnlockedSlidingDoor",
     "HasSpokenToAgentRay",
     "Suspicion",
+}
+local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
+local RUNTIME_RESET_ATTRIBUTES = {
+    [RESTORE_STATE_ATTRIBUTE] = nil,
+    ["WannaWailActive"] = false,
+    ["WannaWailInfectedCount"] = 0,
+    ["WannaWailLastMachine"] = "",
+    ["WannaWailSourceBlocked"] = false,
+    ["WannaWailFirewallRuleAdded"] = false,
+    ["WannaWailProcessKilled"] = false,
+    ["WannaWailLoaderRemoved"] = false,
+    ["WannaWailContained"] = false,
 }
 
 local fallbackProgressCache = {}
@@ -77,6 +90,27 @@ if not LoadSavedProgressRemote then
     LoadSavedProgressRemote = Instance.new("RemoteFunction")
     LoadSavedProgressRemote.Name = "LoadSavedProgress"
     LoadSavedProgressRemote.Parent = remotesFolder
+end
+
+local GetSavedProgressStatusRemote = remotesFolder:FindFirstChild("GetSavedProgressStatus")
+if not GetSavedProgressStatusRemote then
+    GetSavedProgressStatusRemote = Instance.new("RemoteFunction")
+    GetSavedProgressStatusRemote.Name = "GetSavedProgressStatus"
+    GetSavedProgressStatusRemote.Parent = remotesFolder
+end
+
+local ClearSavedProgressRemote = remotesFolder:FindFirstChild("ClearSavedProgress")
+if not ClearSavedProgressRemote then
+    ClearSavedProgressRemote = Instance.new("RemoteFunction")
+    ClearSavedProgressRemote.Name = "ClearSavedProgress"
+    ClearSavedProgressRemote.Parent = remotesFolder
+end
+
+local StartOverProgressRemote = remotesFolder:FindFirstChild("StartOverProgress")
+if not StartOverProgressRemote then
+    StartOverProgressRemote = Instance.new("RemoteFunction")
+    StartOverProgressRemote.Name = "StartOverProgress"
+    StartOverProgressRemote.Parent = remotesFolder
 end
 
 local function extractChapterNumber(scenarioId)
@@ -186,12 +220,23 @@ local function sanitizeClientState(clientState)
     local browserState = type(clientState.browserState) == "table" and clientState.browserState or {}
     local terminalState = type(clientState.terminalState) == "table" and clientState.terminalState or {}
     local packetCapture = type(clientState.packetCapture) == "table" and clientState.packetCapture or {}
+    local blockedIPs = {}
+
+    if type(browserState.blockedIPs) == "table" then
+        for _, value in ipairs(browserState.blockedIPs) do
+            if type(value) == "string" and value ~= "" then
+                blockedIPs[#blockedIPs + 1] = value
+            end
+        end
+    end
 
     return {
         browserState = {
             adminLoggedIn = browserState.adminLoggedIn == true,
             currentUrl = type(browserState.currentUrl) == "string" and browserState.currentUrl or "about:blank",
             stickyNoteInspected = browserState.stickyNoteInspected == true,
+            adminTab = browserState.adminTab == "logs" and "logs" or "database",
+            blockedIPs = blockedIPs,
         },
         terminalState = {
             currentHost = type(terminalState.currentHost) == "string" and terminalState.currentHost or "local",
@@ -237,6 +282,26 @@ local function writeSavedProgress(player, payload)
     end)
 
     return ok, err
+end
+
+local function clearSavedProgress(player)
+    fallbackProgressCache[player.UserId] = nil
+
+    local ok, err = pcall(function()
+        PROGRESS_STORE:RemoveAsync(buildSaveKey(player))
+    end)
+
+    return ok, err
+end
+
+local function resetRuntimeState(player)
+    applyPlayerAttributes(player, {})
+
+    for attributeName, value in pairs(RUNTIME_RESET_ATTRIBUTES) do
+        player:SetAttribute(attributeName, value)
+    end
+
+    CyberScenarioManager.ResetProgress(player)
 end
 
 LoadScenarioRemote.OnServerInvoke = function(player, scenarioId)
@@ -310,6 +375,40 @@ LoadSavedProgressRemote.OnServerInvoke = function(player)
         clientState = sanitizeClientState(payload.clientState),
         sessionInfo = sessionInfo,
         savedAt = payload.savedAt,
+    }
+end
+
+GetSavedProgressStatusRemote.OnServerInvoke = function(player)
+    local payload = readSavedProgress(player)
+    local hasSave = type(payload) == "table"
+
+    return {
+        success = true,
+        hasSave = hasSave,
+        message = hasSave and "Saved progress available." or "No saved progress found.",
+    }
+end
+
+ClearSavedProgressRemote.OnServerInvoke = function(player)
+    local persistent, err = clearSavedProgress(player)
+
+    return {
+        success = true,
+        persistent = persistent,
+        message = persistent and "Saved progress cleared." or "Saved progress cleared for this session only.",
+        warning = persistent and nil or tostring(err),
+    }
+end
+
+StartOverProgressRemote.OnServerInvoke = function(player)
+    local persistent, err = clearSavedProgress(player)
+    resetRuntimeState(player)
+
+    return {
+        success = true,
+        persistent = persistent,
+        message = persistent and "Progress reset. Starting over." or "Progress reset for this session. Starting over.",
+        warning = persistent and nil or tostring(err),
     }
 end
 

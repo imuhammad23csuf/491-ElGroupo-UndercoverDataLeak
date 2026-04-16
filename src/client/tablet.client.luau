@@ -26,6 +26,94 @@ local E_BIND = "HackTablet_E_Block"
 local BLUR_NAME = "HackStartBlur"
 local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
 local SAVE_REMOTE_NAME = "SaveProgress"
+local START_OVER_REMOTE_NAME = "StartOverProgress"
+local WANNAWAIL_ATTR_ACTIVE = "WannaWailActive"
+local WANNAWAIL_ATTR_COUNT = "WannaWailInfectedCount"
+local WANNAWAIL_ATTR_LAST_MACHINE = "WannaWailLastMachine"
+local WANNAWAIL_ATTR_SOURCE_BLOCKED = "WannaWailSourceBlocked"
+local WANNAWAIL_ATTR_FIREWALL_BLOCKED = "WannaWailFirewallRuleAdded"
+local WANNAWAIL_ATTR_PROCESS_KILLED = "WannaWailProcessKilled"
+local WANNAWAIL_ATTR_LOADER_REMOVED = "WannaWailLoaderRemoved"
+local WANNAWAIL_ATTR_CONTAINED = "WannaWailContained"
+local WANNAWAIL_ATTACKER_IP = "203.44.18.77"
+local AUTO_SAVE_DELAY = 1.5
+local AUTO_SAVE_INTERVAL = 12
+local DEFAULT_CHAPTER3_MAILBOX = {
+{
+    id = "verify_admin_access",
+    sender = "Admin Vault <alerts-admin-security.com>",
+    subject = "Verify admin access before shift rollover",
+    body = [[Security review notice,
+
+Your administrator session has been marked for urgent re-verification before tonight's access rollover.
+Use the secure portal below to keep your permissions active:
+http://bloxplay-admin-security.com/verify
+
+- Access Verification Bot]],
+    expectedAction = "report",
+},
+{
+    id = "creator_payout_hold",
+    sender = "Creator Monetization <payouts@bloxplay-secure.net>",
+    subject = "Creator payout hold requires immediate review",
+    body = [[Finance escalation,
+
+A creator payout batch is being held for irregular settlement activity. Open the attached review link and confirm your wallet sync now or the queue will be frozen.
+
+- Payout Review Desk]],
+    expectedAction = "report",
+},
+{
+    id = "asset_pack_invoice",
+    sender = "Marketplace Billing <billing@rbx-assets.co>",
+    subject = "Unpaid asset pack invoice attached",
+    body = [[Accounts payable,
+
+Your team downloaded a premium asset bundle outside the approved catalog. Review the attached invoice package and submit the payment confirmation form today.
+
+- Marketplace Billing]],
+    expectedAction = "report",
+},
+{
+    id = "mfa_reset_notice",
+    sender = "Identity Sync <security@bloxplay-identity.net>",
+    subject = "MFA reset request pending approval",
+    body = [[Identity sync alert,
+
+A multi-factor reset request is waiting for your approval from an unrecognized device. Approve the reset through the secure recovery link before the token expires.
+
+- Identity Sync Alerts]],
+    expectedAction = "report",
+},
+{
+    id = "weekly_stream_roster",
+    sender = "Scheduling Ops <scheduling@bloxplay.com>",
+    subject = "Weekly stream roster and call-time updates",
+    body = [[Morning team,
+
+Attached is the updated stream roster for this week's creator spotlight blocks. Call-time adjustments only affect Thursday and Friday coverage.
+
+Reply in the scheduling thread if your shift needs to change before 14:00.
+
+- Scheduling Ops]],
+    expectedAction = "pass",
+},
+{
+    id = "cafeteria_maintenance",
+    sender = "Facilities Desk <facilities@bloxplay.com>",
+    subject = "Cafeteria maintenance window on Friday",
+    body = [[Heads up,
+
+The cafeteria espresso machine and two refrigerators will be offline for facilities maintenance from 13:00 to 15:00 on Friday.
+
+Please label anything in the shared cooler before noon.
+
+- Facilities Desk]],
+    expectedAction = "pass",
+},
+}
+local SHARED_CHAPTER3_MAILBOX = ((ScenarioData.Chapter3_Malware or {}).mailInbox)
+local CHAPTER3_MAILBOX = (type(SHARED_CHAPTER3_MAILBOX) == "table" and #SHARED_CHAPTER3_MAILBOX > 0) and SHARED_CHAPTER3_MAILBOX or DEFAULT_CHAPTER3_MAILBOX
 local isEquipped = false
 local started = false
 local lastEquipped = false
@@ -33,16 +121,29 @@ local MainGUI, HintGUI
 local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel, MissionsFrame, MissionsList, ObjectivesList
 local chapterExpanded = {}
 local BrowserStatusLabel, BrowserContent, LinkBar
-local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame, AdminStickyNoteButton, AdminStickyNoteBody
+local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame
 local PacketPage, PacketToolbar, PacketListFrame, PacketIPBox, PacketDNSBox, PacketApplyBtn, PacketClearBtn, PacketFollowBtn
 local browserState = {
 adminLoggedIn = false,
 currentUrl = "about:blank",
 stickyNoteInspected = false,
+adminTab = "database",
+blockedIPs = {},
+selectedMailId = type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or "",
+logStreamStartedAt = 0,
+logsLastRender = 0,
+lastInteractionAt = os.clock(),
+idleAutoSaveNotified = false,
 }
 local commandHistory = {}
 local historyIndex = nil
 local currentDraft = ""
+local autoSaveQueuedAt = 0
+local autoSaveLastRunAt = 0
+local autoSaveInFlight = false
+local autoSaveSuppressed = false
+local replayPromptShown = false
+local replayPromptClearDone = false
 local terminalState = {
 currentHost = "local",
 currentDir = "/",
@@ -60,6 +161,7 @@ rows = {},
 local captureProgressState
 local applyProgressState
 local applyPendingRestoreState
+local submitScenarioAction
 local function makePlayerRecord(i)
 local first = { "Aiden", "Nova", "Jules", "Mika", "Riley", "Zane", "Lena", "Kai", "Iris", "Noah", "Milo", "Ava" }
 local last = { "Stone", "Mercer", "Blaze", "Skylark", "Rift", "Vale", "Keen", "Pixel", "Byte", "Crest", "Ash", "Orbit" }
@@ -267,33 +369,163 @@ localhost = {
 },
 }
 local FakeAdminRecords = {
-{ username = "rick_dev", role = "Developer", dept = "Systems", note = "Reset password requested last week." },
-{ username = "novaplayz", role = "Moderator", dept = "Community", note = "Remote login from 192.168.32.12 flagged." },
-{ username = "marcus_lee", role = "IT Support", dept = "Infrastructure", note = "Accessed PlayerData_Vault successfully." },
-{ username = "junpark", role = "Security Analyst", dept = "Security", note = "Left note about weak WiFi segmentation." },
-{ username = "bloxplay-admin", role = "Administrator", dept = "Core Ops", note = "Credentials spotted in simulated HTTP traffic." },
-{ username = "vault_ops", role = "Data Steward", dept = "Trust & Safety", note = "PlayerData_Vault exposes user profile sync logs." },
+{ username = "rick_dev", role = "Developer", dept = "Systems", note = "Debug access was left enabled on an internal dashboard." },
+{ username = "novaplayz", role = "Moderator", dept = "Community", note = "Workstation traffic touches the admin surface from a mixed-trust segment." },
+{ username = "marcus_lee", role = "IT Support", dept = "Infrastructure", note = "PlayerData_Vault login seen from the admin gateway during maintenance." },
+{ username = "junpark", role = "Security Analyst", dept = "Security", note = "Documented weak segmentation between user WiFi and admin services." },
+{ username = "bloxplay-admin", role = "Administrator", dept = "Core Ops", note = "Shared portal credential still active pending password rotation." },
+{ username = "vault_ops", role = "Data Steward", dept = "Trust & Safety", note = "Security logs and player export tooling live behind the same portal." },
 }
+local AdminLogFeed = {
+base = {
+{ severity = "MEDIUM", title = "Shared admin surface exposed", detail = "Admin portal remains reachable from a mixed-trust access path.", stamp = "08:01" },
+{ severity = "HIGH", title = "Repeated sign-in failures", detail = "Multiple admin sign-in failures were recorded before the incident escalated.", stamp = "08:02" },
+{ severity = "MEDIUM", title = "Vault path from workstation", detail = "User workstation traffic is reaching the player-data environment over the same trust zone.", stamp = "08:05" },
+},
+live = {
+{ severity = "HIGH", title = "Outbound vault callback started", detail = "PlayerData_Vault initiated a new external session during the active incident.", stamp = "08:14" },
+{ severity = "CRITICAL", title = "Mass file rename burst", detail = "Multiple office endpoints reported rapid rename activity consistent with ransomware staging.", stamp = "08:15" },
+{ severity = "CRITICAL", title = "Ransom banners written", detail = "Endpoints began rendering red ransomware notices across user-facing screens.", stamp = "08:16" },
+{ severity = "HIGH", title = "sync_jobs.sh persistence", detail = "A non-approved sync process remained active on the vault after the first endpoint alerts.", stamp = "08:17" },
+{ severity = "CRITICAL", title = "Profile export queued", detail = "Player export data was staged for outbound transfer while the outbreak was still live.", stamp = "08:18" },
+},
+}
+local function getWannaWailIncidentLogs()
+local currentChapter = tonumber(Player:GetAttribute("CurrentChapter")) or 0
+if currentChapter < 3 then
+return {}
+end
+local infectedCount = math.max(tonumber(Player:GetAttribute(WANNAWAIL_ATTR_COUNT)) or 0, 0)
+local active = Player:GetAttribute(WANNAWAIL_ATTR_ACTIVE) == true or infectedCount > 0
+local lastMachine = tostring(Player:GetAttribute(WANNAWAIL_ATTR_LAST_MACHINE) or "Office Terminal 01")
+local sourceBlocked = Player:GetAttribute(WANNAWAIL_ATTR_SOURCE_BLOCKED) == true
+local firewallBlocked = Player:GetAttribute(WANNAWAIL_ATTR_FIREWALL_BLOCKED) == true
+local processKilled = Player:GetAttribute(WANNAWAIL_ATTR_PROCESS_KILLED) == true
+local loaderRemoved = Player:GetAttribute(WANNAWAIL_ATTR_LOADER_REMOVED) == true
+local contained = Player:GetAttribute(WANNAWAIL_ATTR_CONTAINED) == true
+local logs = {}
+local function push(template, detail)
+logs[#logs + 1] = {
+severity = template.severity,
+title = template.title,
+detail = detail,
+stamp = template.stamp,
+}
+end
+if active and infectedCount >= 1 then
+push(AdminLogFeed.live[1], ("Latest endpoint alert from %s shows outbound callback activity tied to %s."):format(lastMachine, WANNAWAIL_ATTACKER_IP))
+end
+if infectedCount >= 2 then
+push(AdminLogFeed.live[2], ("%d office endpoints now report rapid rename activity consistent with live ransomware spread."):format(infectedCount))
+end
+if infectedCount >= 3 then
+push(AdminLogFeed.live[3], ("%d user-facing screens now show WannaWail banners. Latest hit: %s."):format(infectedCount, lastMachine))
+end
+if active and not processKilled then
+push(AdminLogFeed.live[4], "The sync_jobs.sh process is still alive on PlayerData_Vault and continues coordinating the outbreak.")
+end
+if infectedCount >= 4 and not sourceBlocked then
+push(AdminLogFeed.live[5], ("Player export traffic is still trying to stage outbound transfer through %s while the outbreak remains active."):format(WANNAWAIL_ATTACKER_IP))
+end
+if sourceBlocked then
+logs[#logs + 1] = {
+severity = "HIGH",
+title = "Emergency browser block applied",
+detail = ("RBXIPBlocker denied the hostile source %s at the browser response layer."):format(WANNAWAIL_ATTACKER_IP),
+stamp = "08:19",
+}
+end
+if firewallBlocked then
+logs[#logs + 1] = {
+severity = "MEDIUM",
+title = "Vault firewall deny rule added",
+detail = ("PlayerData_Vault now mirrors the deny rule for %s locally."):format(WANNAWAIL_ATTACKER_IP),
+stamp = "08:20",
+}
+end
+if processKilled then
+logs[#logs + 1] = {
+severity = "MEDIUM",
+title = "Malicious process terminated",
+detail = "PID 1337 (sync_jobs.sh) was terminated on PlayerData_Vault.",
+stamp = "08:21",
+}
+end
+if loaderRemoved then
+logs[#logs + 1] = {
+severity = "MEDIUM",
+title = "Loader removed from vault",
+detail = "sync_jobs.sh has been deleted from PlayerData_Vault.",
+stamp = "08:22",
+}
+end
+if contained or (sourceBlocked and firewallBlocked and processKilled and loaderRemoved) then
+logs[#logs + 1] = {
+severity = "MEDIUM",
+title = "Incident contained",
+detail = "WannaWail spread has stopped and the hostile source is no longer reaching the vault.",
+stamp = "08:23",
+}
+end
+return logs
+end
 local PAGES = {
-["hackos://home"] =
-"Welcome to HackOS (SIM)\n\nQuick Links:\n- hackos://tips\n- hackos://apps\n- RBXPacketNet.com\n- bloxplay.com/admin\n\nTraining Path:\n1) Scan nearby devices\n2) Inspect targeted packet traffic\n3) Pivot to PlayerData_Vault\n4) Review logs and processes\n5) Stop the attacker",
-["hackos://tips"] =
-"Safety Tips (SIM)\n\n- Use strong passwords\n- Turn on 2FA\n- Verify suspicious login pages\n- Review logs after incidents",
-["hackos://apps"] =
-"Apps (SIM)\n- Terminal\n- Browser\n- Packet Analyzer (RBXPacketNet.com)\n- Admin Portal (bloxplay.com/admin)",
-["bloxplay.com/admin"] =
-"BLOXPLAY ADMIN LOGIN (SIM)\nUse the browser login form.",
-["www.bloxplay.com/admin"] =
-"BLOXPLAY ADMIN LOGIN (SIM)\nUse the browser login form.",
-["rbxpacketnet.com"] =
-"RBXPacketNet (SIM)\nBrowser packet analyzer ready.",
-["www.rbxpacketnet.com"] =
-"RBXPacketNet (SIM)\nBrowser packet analyzer ready.",
+['hackos://home'] = [[Welcome to HackOS (SIM)
+
+Quick Links:
+- hackos://tips
+- hackos://apps
+- mail.bloxplay.com
+- RBXPacketNet.com
+- bloxplay.com/admin
+- RBXIPBlocker.com
+
+Training Path:
+1) Active recon
+2) Portal authentication
+3) File system forensics
+4) Phishing triage and live incident tracing
+5) Containment and cleanup]],
+['hackos://tips'] = [[Safety Tips (SIM)
+
+- Separate user traffic from admin services
+- Never leave credentials on physical notes
+- Classify suspicious mail before it reaches internal systems
+- Review security logs while incidents are live
+- Block hostile sources in multiple layers]],
+['hackos://apps'] = [[Apps (SIM)
+- Terminal
+- Browser
+- BloxMail (mail.bloxplay.com)
+- Packet Analyzer (RBXPacketNet.com)
+- Admin Portal (bloxplay.com/admin)
+- Emergency Source Blocker (RBXIPBlocker.com)]],
+['mail.bloxplay.com'] = [[BloxMail (SIM)
+Staff inbox ready. Classify each message with Report or Pass Through.]],
+['www.mail.bloxplay.com'] = [[BloxMail (SIM)
+Staff inbox ready. Classify each message with Report or Pass Through.]],
+['bloxplay.com/admin'] = [[BLOXPLAY ADMIN LOGIN (SIM)
+Use the browser login form.]],
+['www.bloxplay.com/admin'] = [[BLOXPLAY ADMIN LOGIN (SIM)
+Use the browser login form.]],
+['rbxpacketnet.com'] = [[RBXPacketNet (SIM)
+Browser packet analyzer ready.]],
+['www.rbxpacketnet.com'] = [[RBXPacketNet (SIM)
+Browser packet analyzer ready.]],
+['rbxipblocker.com'] = [[RBXIPBlocker (SIM)
+Emergency source blocking console ready.]],
+['www.rbxipblocker.com'] = [[RBXIPBlocker (SIM)
+Emergency source blocking console ready.]],
 }
 local function notify(t)
 pcall(function()
 StarterGui:SetCore("SendNotification", t)
 end)
+end
+
+browserState._markInteraction = function()
+	browserState.lastInteractionAt = os.clock()
+	browserState.idleAutoSaveNotified = false
 end
 local function mk(t, p)
 local i = Instance.new(t)
@@ -371,21 +603,59 @@ return nil
 end
 return remotes:FindFirstChild(name)
 end
-local function saveNow()
+local function saveNow(options)
+options = options or {}
+if autoSaveSuppressed then
+if not options.silent then
+notify({ Title = "HackTablet", Text = "Autosave is disabled after mission completion.", Duration = 3 })
+end
+autoSaveQueuedAt = 0
+return false
+end
+if autoSaveInFlight then
+if options.force then
+autoSaveQueuedAt = os.clock()
+end
+return false
+end
 local saveRemote = getRemote(SAVE_REMOTE_NAME)
 if not saveRemote then
+if not options.silent then
 notify({ Title = "HackTablet", Text = "Save service unavailable.", Duration = 3 })
-return
 end
+return false
+end
+autoSaveInFlight = true
 local ok, result = pcall(function()
 return saveRemote:InvokeServer(captureProgressState and captureProgressState() or nil)
 end)
+autoSaveInFlight = false
 if not ok or type(result) ~= "table" or not result.success then
+if not options.silent then
 notify({ Title = "HackTablet", Text = "Could not save progress.", Duration = 3 })
-return
 end
+return false
+end
+autoSaveQueuedAt = 0
+autoSaveLastRunAt = os.clock()
+if not options.silent then
 notify({ Title = "HackTablet", Text = tostring(result.message or "Progress saved."), Duration = 2 })
 end
+return true
+end
+
+local function queueAutoSave(force)
+if autoSaveSuppressed then
+autoSaveQueuedAt = 0
+return false
+end
+if force then
+return saveNow({ silent = true, force = true })
+end
+autoSaveQueuedAt = os.clock()
+return true
+end
+
 local function teardownStart()
 local blur = Lighting:FindFirstChild(BLUR_NAME)
 if blur then blur:Destroy() end
@@ -420,7 +690,9 @@ local low = u:lower()
 if low == "home" then return "hackos://home" end
 if low == "tips" then return "hackos://tips" end
 if low == "apps" then return "hackos://apps" end
+if low == "mail" or low == "bloxmail" then return "mail.bloxplay.com" end
 if low == "packetanalyzer" or low == "rbxpacketnet" then return "rbxpacketnet.com" end
+if low == "ipblocker" or low == "rbxipblocker" then return "rbxipblocker.com" end
 if low:sub(1, 8) == "hackos://" then
 return low
 end
@@ -436,6 +708,10 @@ local function hideAllBrowserPages()
 if AdminLoginPage then AdminLoginPage.Visible = false end
 if AdminDashboardPage then AdminDashboardPage.Visible = false end
 if PacketPage then PacketPage.Visible = false end
+local mailPage = BrowserContent and BrowserContent:FindFirstChild("MailPage")
+if mailPage then mailPage.Visible = false end
+local ipBlockerPage = BrowserContent and BrowserContent:FindFirstChild("IPBlockerPage")
+if ipBlockerPage then ipBlockerPage.Visible = false end
 if PageLabel then PageLabel.Visible = false end
 end
 local function randomChoice(t)
@@ -468,54 +744,148 @@ ActivePacketCapture.targetLabel = ""
 ActivePacketCapture.rows = {}
 return false
 end
-local protocols = { "TCP", "UDP", "DNS", "HTTP", "HTTPS" }
-local dnsNames = {
-"bloxplay.com",
-"admin.bloxplay.local",
-"playerdata.bloxplay.local",
-"streamrelay.bloxplay.net",
-"cdn.bloxplay.net",
-"auth.bloxplay.local",
-"creatorhub.bloxplay.local",
-}
-local peerHosts = getAllHostsList()
 local rows = {}
-local count = math.random(10, 16)
-for _ = 1, count do
-local proto = randomChoice(protocols)
-local peer = randomChoice(peerHosts)
-local srcIP, dstIP
-local dnsText = randomChoice(dnsNames)
-local port = tostring(randomChoice(host.ports))
-local serverName = host.server
-if math.random() < 0.5 then
-srcIP = host.ip
-dstIP = peer.ip
-else
-srcIP = peer.ip
-dstIP = host.ip
-end
-if proto == "DNS" then
-port = tostring(randomChoice({ 53, 5353 }))
-serverName = "NameMesh"
-elseif proto == "HTTP" then
-port = "80"
-elseif proto == "HTTPS" then
-port = "443"
-elseif proto == "TCP" then
-port = tostring(randomChoice(host.ports))
-elseif proto == "UDP" then
-port = tostring(randomChoice(host.ports))
-end
-table.insert(rows, {
+if host.label == "Laptop" then
+rows = {
+{
 ip = host.ip,
-protocol = proto,
-dns = dnsText,
-port = port,
-server = serverName,
-src = srcIP,
-dst = dstIP,
-})
+protocol = "DNS",
+dns = "admin.bloxplay.local",
+port = "53",
+server = "NameMesh",
+src = "192.168.32.12",
+dst = "192.168.32.10",
+tag = "Exposure",
+tone = "warning",
+summary = "Workstation resolves an internal admin zone from the same user-facing network path.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "bloxplay.com/admin",
+port = "443",
+server = "CorePanel",
+src = "192.168.32.12",
+dst = "192.168.43.2",
+tag = "Vulnerability",
+tone = "danger",
+summary = "Admin portal is reachable from a mixed-trust workstation segment.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "auth.bloxplay.local",
+port = "443",
+server = "CorePanel",
+src = "192.168.32.12",
+dst = "192.168.43.2",
+tag = "Credential Path",
+tone = "danger",
+summary = "Authentication traffic shares the same route as user workstation activity.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "playerdata.bloxplay.local",
+port = "443",
+server = "VaultLeaf",
+src = "192.168.32.12",
+dst = "192.168.43.20",
+tag = "Sensitive",
+tone = "warning",
+summary = "The workstation can talk directly to player-data services across the exposed path.",
+},
+{
+ip = host.ip,
+protocol = "HTTP",
+dns = "sync-edge.bloxcdn.net",
+port = "80",
+server = "VaultLeaf",
+src = "192.168.43.20",
+dst = "203.44.18.77",
+tag = "Suspicious",
+tone = "danger",
+summary = "Unexpected cleartext callback leaves the protected zone during the capture window.",
+},
+{
+ip = host.ip,
+protocol = "DNS",
+dns = "cdn.bloxplay.net",
+port = "53",
+server = "NameMesh",
+src = "192.168.32.12",
+dst = "192.168.32.10",
+tag = "Normal",
+tone = "normal",
+summary = "Routine content delivery lookup from the workstation.",
+},
+}
+elseif host.label == "PlayerData_Vault" then
+rows = {
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "playerdata.bloxplay.local",
+port = "443",
+server = "VaultLeaf",
+src = "192.168.43.20",
+dst = "192.168.43.2",
+tag = "Internal",
+tone = "normal",
+summary = "Expected vault-to-gateway management traffic.",
+},
+{
+ip = host.ip,
+protocol = "HTTP",
+dns = "sync-edge.bloxcdn.net",
+port = "80",
+server = "VaultLeaf",
+src = "192.168.43.20",
+dst = "203.44.18.77",
+tag = "Suspicious",
+tone = "danger",
+summary = "External callback from the vault appears outside approved maintenance flow.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "bloxplay.com/admin",
+port = "443",
+server = "CorePanel",
+src = "192.168.43.2",
+dst = "192.168.43.20",
+tag = "Control",
+tone = "warning",
+summary = "Management traffic is transiting the same trust path as the incident activity.",
+},
+}
+else
+rows = {
+{
+ip = host.ip,
+protocol = "DNS",
+dns = "cdn.bloxplay.net",
+port = "53",
+server = "NameMesh",
+src = host.ip,
+dst = "192.168.32.10",
+tag = "Normal",
+tone = "normal",
+summary = "Routine service discovery from the selected host.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "bloxplay.com",
+port = "443",
+server = host.server,
+src = host.ip,
+dst = "192.168.32.10",
+tag = "Observed",
+tone = "warning",
+summary = "General application traffic from the selected system.",
+},
+}
 end
 ActivePacketCapture.targetIP = host.ip
 ActivePacketCapture.targetLabel = host.label
@@ -666,39 +1036,252 @@ PageLabel.Text = text or ""
 end
 setBrowserStatus(status or "Static page loaded (sim)")
 end
-local function refreshAdminStickyNote()
-if not AdminStickyNoteBody then return end
-if browserState.stickyNoteInspected then
-AdminStickyNoteBody.Text = table.concat({
-"Portal",
-"bloxplay.com/admin",
-"",
-"User",
-"bloxplay-admin",
-"",
-"Pass",
-"blox123",
-}, "\n")
-else
-AdminStickyNoteBody.Text = "Desk Sticky Note\n\nClick to inspect"
-end
-end
 local function showAdminLoginPage(url)
 hideAllBrowserPages()
 if AdminLoginPage then
 AdminLoginPage.Visible = true
 end
-refreshAdminStickyNote()
-setBrowserStatus(("Loaded %s (sim auth required)"):format(url))
+if AdminLoginStatus then
+AdminLoginStatus.Text = "Administrator credentials required."
+end
+setBrowserStatus(("Loaded %s (credentials required)"):format(url))
+end
+local function renderAdminLogs()
+if not AdminDashboardPage then return end
+local logsFrame = AdminDashboardPage:FindFirstChild("AdminLogsFrame")
+if not logsFrame or not logsFrame:IsA("ScrollingFrame") then return end
+for _, child in ipairs(logsFrame:GetChildren()) do
+if child:IsA("Frame") then
+child:Destroy()
+end
+end
+local layout = logsFrame:FindFirstChild("UIListLayout")
+if not layout then
+layout = mk("UIListLayout", {
+Parent = logsFrame,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
+end
+local logs = {}
+for _, entry in ipairs(AdminLogFeed.base) do
+logs[#logs + 1] = entry
+end
+for _, entry in ipairs(getWannaWailIncidentLogs()) do
+logs[#logs + 1] = entry
+end
+for _, entry in ipairs(logs) do
+local chipColor = Color3.fromRGB(78, 125, 255)
+local cardColor = Color3.fromRGB(243, 247, 255)
+if entry.severity == "MEDIUM" then
+chipColor = Color3.fromRGB(208, 143, 38)
+cardColor = Color3.fromRGB(255, 249, 235)
+elseif entry.severity == "HIGH" then
+chipColor = Color3.fromRGB(212, 92, 49)
+cardColor = Color3.fromRGB(255, 243, 239)
+elseif entry.severity == "CRITICAL" then
+chipColor = Color3.fromRGB(184, 43, 43)
+cardColor = Color3.fromRGB(255, 236, 236)
+end
+local card = mk("Frame", {
+Parent = logsFrame,
+BackgroundColor3 = cardColor,
+BorderSizePixel = 0,
+Size = UDim2.new(1, -10, 0, 88),
+})
+round(card, 8)
+local chip = mk("TextLabel", {
+Parent = card,
+BackgroundColor3 = chipColor,
+BorderSizePixel = 0,
+Text = tostring(entry.severity),
+Font = Enum.Font.GothamBold,
+TextSize = 11,
+TextColor3 = Color3.new(1, 1, 1),
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(0, 76, 0, 20),
+})
+round(chip, 6)
+mk("TextLabel", {
+Parent = card,
+BackgroundTransparency = 1,
+Text = tostring(entry.stamp),
+Font = Enum.Font.Code,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(70, 78, 92),
+TextXAlignment = Enum.TextXAlignment.Right,
+Position = UDim2.new(1, -88, 0, 12),
+Size = UDim2.new(0, 78, 0, 18),
+})
+mk("TextLabel", {
+Parent = card,
+BackgroundTransparency = 1,
+Text = tostring(entry.title),
+Font = Enum.Font.GothamBold,
+TextSize = 14,
+TextColor3 = Color3.fromRGB(25, 30, 38),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 36),
+Size = UDim2.new(1, -20, 0, 18),
+})
+mk("TextLabel", {
+Parent = card,
+BackgroundTransparency = 1,
+TextWrapped = true,
+TextYAlignment = Enum.TextYAlignment.Top,
+Text = tostring(entry.detail),
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(70, 78, 92),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 56),
+Size = UDim2.new(1, -20, 0, 24),
+})
+end
+task.defer(function()
+logsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end)
+end
+local function renderIPBlockerHistory()
+local ipBlockerPage = BrowserContent and BrowserContent:FindFirstChild("IPBlockerPage")
+local historyFrame = ipBlockerPage and ipBlockerPage:FindFirstChild("IPBlockerHistoryFrame")
+if not historyFrame or not historyFrame:IsA("ScrollingFrame") then return end
+for _, child in ipairs(historyFrame:GetChildren()) do
+if child:IsA("Frame") then
+child:Destroy()
+end
+end
+local layout = historyFrame:FindFirstChild("UIListLayout")
+if not layout then
+layout = mk("UIListLayout", {
+Parent = historyFrame,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
+end
+local blockedIPs = browserState.blockedIPs or {}
+if #blockedIPs == 0 then
+local empty = mk("Frame", {
+Parent = historyFrame,
+BackgroundColor3 = Color3.fromRGB(240, 243, 249),
+BorderSizePixel = 0,
+Size = UDim2.new(1, -10, 0, 48),
+})
+round(empty, 8)
+mk("TextLabel", {
+Parent = empty,
+BackgroundTransparency = 1,
+Text = "No blocked sources recorded yet.",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(70, 78, 92),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 14),
+Size = UDim2.new(1, -20, 0, 18),
+})
+else
+for _, ip in ipairs(blockedIPs) do
+local row = mk("Frame", {
+Parent = historyFrame,
+BackgroundColor3 = Color3.fromRGB(236, 245, 238),
+BorderSizePixel = 0,
+Size = UDim2.new(1, -10, 0, 54),
+})
+round(row, 8)
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = ip,
+Font = Enum.Font.Code,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(22, 86, 46),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(1, -20, 0, 16),
+})
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = "Browser response rule active",
+Font = Enum.Font.Gotham,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(49, 101, 68),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 28),
+Size = UDim2.new(1, -20, 0, 14),
+})
+end
+end
+task.defer(function()
+historyFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end)
 end
 local function showAdminDashboard(url)
 hideAllBrowserPages()
 if AdminDashboardPage then
 AdminDashboardPage.Visible = true
 end
-renderAdminResults(AdminSearchBox and AdminSearchBox.Text or "")
-setBrowserStatus(("Authenticated to %s (sim)"):format(url))
+local databaseTabBtn = AdminDashboardPage and AdminDashboardPage:FindFirstChild("AdminDatabaseTabBtn")
+local logsTabBtn = AdminDashboardPage and AdminDashboardPage:FindFirstChild("AdminLogsTabBtn")
+local logsFrame = AdminDashboardPage and AdminDashboardPage:FindFirstChild("AdminLogsFrame")
+local showLogs = browserState.adminTab == "logs"
+if AdminSearchBox then
+AdminSearchBox.Visible = not showLogs
 end
+if AdminResultsFrame then
+AdminResultsFrame.Visible = not showLogs
+end
+if logsFrame then
+logsFrame.Visible = showLogs
+end
+if databaseTabBtn and databaseTabBtn:IsA("TextButton") then
+databaseTabBtn.BackgroundColor3 = showLogs and Color3.fromRGB(100, 110, 132) or Color3.fromRGB(76, 123, 255)
+end
+if logsTabBtn and logsTabBtn:IsA("TextButton") then
+logsTabBtn.BackgroundColor3 = showLogs and Color3.fromRGB(76, 123, 255) or Color3.fromRGB(100, 110, 132)
+end
+if showLogs then
+renderAdminLogs()
+setBrowserStatus(("Authenticated to %s - security logs live"):format(url))
+else
+renderAdminResults(AdminSearchBox and AdminSearchBox.Text or "")
+setBrowserStatus(("Authenticated to %s (database view)"):format(url))
+end
+end
+local function showIPBlockerPage(url)
+hideAllBrowserPages()
+local ipBlockerPage = BrowserContent and BrowserContent:FindFirstChild("IPBlockerPage")
+if ipBlockerPage then
+ipBlockerPage.Visible = true
+end
+local inputBox = ipBlockerPage and ipBlockerPage:FindFirstChild("IPBlockerInputBox")
+if inputBox and inputBox:IsA("TextBox") then
+inputBox.Text = ""
+end
+local statusLabel = ipBlockerPage and ipBlockerPage:FindFirstChild("IPBlockerStatus")
+if statusLabel and statusLabel:IsA("TextLabel") then
+statusLabel.Text = "Enter a hostile source from the investigation feed."
+end
+renderIPBlockerHistory()
+setBrowserStatus(("Loaded %s response console (sim)"):format(url))
+end
+local function showMailPage(url)
+hideAllBrowserPages()
+local mailPage = BrowserContent and BrowserContent:FindFirstChild("MailPage")
+if mailPage then
+mailPage.Visible = true
+end
+if (browserState.selectedMailId == nil or browserState.selectedMailId == "") and type(CHAPTER3_MAILBOX[1]) == "table" then
+browserState.selectedMailId = tostring(CHAPTER3_MAILBOX[1].id or "")
+end
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+setBrowserStatus(("Loaded %s staff inbox (sim)"):format(url))
+end
+
 local function packetMatchesFilter(pkt, dnsFilter)
 dnsFilter = tostring(dnsFilter or ""):lower()
 if dnsFilter == "" then
@@ -777,56 +1360,76 @@ Size = UDim2.new(1, -20, 0, 20),
 })
 end
 for _, pkt in ipairs(rows) do
+local rowColor = Color3.fromRGB(241, 246, 252)
+local accentColor = Color3.fromRGB(76, 123, 255)
+local chipText = Color3.new(1, 1, 1)
+if pkt.tone == "warning" then
+rowColor = Color3.fromRGB(255, 248, 234)
+accentColor = Color3.fromRGB(210, 143, 38)
+elseif pkt.tone == "danger" then
+rowColor = Color3.fromRGB(255, 238, 238)
+accentColor = Color3.fromRGB(186, 61, 61)
+end
 local row = mk("Frame", {
 Parent = PacketListFrame,
-BackgroundColor3 = Color3.fromRGB(244, 247, 252),
+BackgroundColor3 = rowColor,
 BorderSizePixel = 0,
-Size = UDim2.new(1, -10, 0, 96),
+Size = UDim2.new(1, -10, 0, 114),
 })
 round(row, 8)
+mk("Frame", {
+Parent = row,
+BackgroundColor3 = accentColor,
+BorderSizePixel = 0,
+Position = UDim2.new(0, 0, 0, 0),
+Size = UDim2.new(0, 6, 1, 0),
+})
 mk("TextLabel", {
 Parent = row,
 BackgroundTransparency = 1,
-Text = "IP: " .. pkt.ip .. " PROTOCOL: " .. pkt.protocol,
+Text = pkt.protocol .. "  " .. pkt.src .. "  ->  " .. pkt.dst,
 Font = Enum.Font.GothamBold,
 TextSize = 13,
 TextColor3 = Color3.fromRGB(20, 20, 28),
 TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 6),
-Size = UDim2.new(1, -20, 0, 18),
+Position = UDim2.new(0, 14, 0, 8),
+Size = UDim2.new(1, -124, 0, 18),
 })
+local chip = mk("TextLabel", {
+Parent = row,
+BackgroundColor3 = accentColor,
+BorderSizePixel = 0,
+Text = pkt.tag,
+Font = Enum.Font.GothamBold,
+TextSize = 11,
+TextColor3 = chipText,
+Position = UDim2.new(1, -100, 0, 8),
+Size = UDim2.new(0, 88, 0, 20),
+})
+round(chip, 6)
 mk("TextLabel", {
 Parent = row,
 BackgroundTransparency = 1,
-Text = "SRC: " .. pkt.src .. " DST: " .. pkt.dst,
+Text = "DNS: " .. pkt.dns .. "    PORT: " .. pkt.port .. "    SERVER: " .. pkt.server,
 Font = Enum.Font.Code,
 TextSize = 12,
 TextColor3 = Color3.fromRGB(35, 45, 60),
 TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 26),
-Size = UDim2.new(1, -20, 0, 16),
+Position = UDim2.new(0, 14, 0, 32),
+Size = UDim2.new(1, -28, 0, 16),
 })
 mk("TextLabel", {
 Parent = row,
 BackgroundTransparency = 1,
-Text = "DNS: " .. pkt.dns,
-Font = Enum.Font.Code,
-TextSize = 12,
-TextColor3 = Color3.fromRGB(35, 45, 60),
+TextWrapped = true,
+TextYAlignment = Enum.TextYAlignment.Top,
+Text = pkt.summary,
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(58, 67, 80),
 TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 44),
-Size = UDim2.new(1, -20, 0, 16),
-})
-mk("TextLabel", {
-Parent = row,
-BackgroundTransparency = 1,
-Text = "PORT: " .. pkt.port .. " SERVER: " .. pkt.server,
-Font = Enum.Font.Code,
-TextSize = 12,
-TextColor3 = Color3.fromRGB(35, 45, 60),
-TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 62),
-Size = UDim2.new(1, -20, 0, 16),
+Position = UDim2.new(0, 14, 0, 56),
+Size = UDim2.new(1, -28, 0, 42),
 })
 end
 task.defer(function()
@@ -852,18 +1455,46 @@ showTextPage("", "")
 return
 end
 if uNorm == "bloxplay.com/admin" or uNorm == "www.bloxplay.com/admin" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit bloxplay.com/admin", { "ch2_admin_portal" })
 if browserState.adminLoggedIn then
 showAdminDashboard(uNorm)
 else
 showAdminLoginPage(uNorm)
 end
+if result and result.success then
+setBrowserStatus("Admin portal reached. Mission step complete.")
+end
+return
+end
+if uNorm == "mail.bloxplay.com" or uNorm == "www.mail.bloxplay.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit mail.bloxplay.com", { "ch3_mail_site" })
+showMailPage(uNorm)
+queueAutoSave(false)
+if result and result.success then
+setBrowserStatus("BloxMail opened. Mission step complete.")
+end
 return
 end
 if uNorm == "rbxpacketnet.com" or uNorm == "www.rbxpacketnet.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit rbxpacketnet.com", { "ch1_packetnet" })
 showPacketPage(uNorm)
+queueAutoSave(false)
+if result and result.success then
+setBrowserStatus("RBXPacketNet opened. Mission step complete.")
+end
+return
+end
+if uNorm == "rbxipblocker.com" or uNorm == "www.rbxipblocker.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit rbxipblocker.com", { "ch4_visit_blocker" })
+showIPBlockerPage(uNorm)
+queueAutoSave(false)
+if result and result.success then
+setBrowserStatus("RBXIPBlocker opened. Mission step complete.")
+end
 return
 end
 showTextPage(PAGES[uNorm] or ('No renderer for "%s" (sim).'):format(url), "Page loaded (sim)")
+queueAutoSave(false)
 end
 captureProgressState = function()
 local openFiles = {}
@@ -882,11 +1513,19 @@ server = terminalState.sniffCache.server,
 attackerIP = terminalState.sniffCache.attackerIP,
 }
 end
+local blockedIPs = {}
+for _, ip in ipairs(browserState.blockedIPs or {}) do
+blockedIPs[#blockedIPs + 1] = tostring(ip)
+end
+table.sort(blockedIPs)
 return {
 browserState = {
 adminLoggedIn = browserState.adminLoggedIn == true,
 currentUrl = tostring(browserState.currentUrl or "about:blank"),
 stickyNoteInspected = browserState.stickyNoteInspected == true,
+adminTab = browserState.adminTab == "logs" and "logs" or "database",
+blockedIPs = blockedIPs,
+selectedMailId = tostring(browserState.selectedMailId or ""),
 },
 terminalState = {
 currentHost = tostring(terminalState.currentHost or "local"),
@@ -920,10 +1559,23 @@ server = terminal.sniffCache.server,
 attackerIP = terminal.sniffCache.attackerIP,
 }
 end
+local blockedIPs = {}
+if type(browser.blockedIPs) == "table" then
+for _, ip in ipairs(browser.blockedIPs) do
+if type(ip) == "string" and ip ~= "" then
+blockedIPs[#blockedIPs + 1] = ip
+end
+end
+end
 browserState = {
 adminLoggedIn = browser.adminLoggedIn == true,
 currentUrl = type(browser.currentUrl) == "string" and browser.currentUrl or "about:blank",
 stickyNoteInspected = browser.stickyNoteInspected == true,
+adminTab = browser.adminTab == "logs" and "logs" or "database",
+blockedIPs = blockedIPs,
+selectedMailId = type(browser.selectedMailId) == "string" and browser.selectedMailId or (type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or ""),
+logStreamStartedAt = 0,
+logsLastRender = 0,
 }
 terminalState = {
 currentHost = type(terminal.currentHost) == "string" and terminal.currentHost or "local",
@@ -956,7 +1608,9 @@ end
 if PacketIPBox then
 PacketIPBox.Text = ActivePacketCapture.targetIP
 end
-refreshAdminStickyNote()
+if PacketDNSBox then
+PacketDNSBox.Text = ""
+end
 if PacketPage and PacketPage.Visible then
 populatePacketRows()
 end
@@ -980,6 +1634,10 @@ return false
 end
 return applyProgressState(state)
 end
+do
+local simOps = browserState._simOps or {}
+browserState._simOps = simOps
+
 local function getHostKey()
 if terminalState.currentHost == "PlayerData_Vault" then
 return "playerdata_vault"
@@ -1001,6 +1659,17 @@ end
 local function getProcesses()
     local host = getHostKey()
     return SimProcessesByHost[host] or SimProcessesByHost.localhost
+end
+local function refreshWannaWailContainmentState()
+local sourceBlocked = Player:GetAttribute(WANNAWAIL_ATTR_SOURCE_BLOCKED) == true
+local firewallBlocked = Player:GetAttribute(WANNAWAIL_ATTR_FIREWALL_BLOCKED) == true
+local processKilled = Player:GetAttribute(WANNAWAIL_ATTR_PROCESS_KILLED) == true
+local loaderRemoved = Player:GetAttribute(WANNAWAIL_ATTR_LOADER_REMOVED) == true
+Player:SetAttribute(WANNAWAIL_ATTR_CONTAINED, sourceBlocked and firewallBlocked and processKilled and loaderRemoved)
+end
+local function markWannaWailFlag(attributeName, value)
+Player:SetAttribute(attributeName, value == true)
+refreshWannaWailContainmentState()
 end
 local function splitPath(path)
     local parts = {}
@@ -1192,6 +1861,9 @@ local function removeFile(path)
             end
         end
         addLine(("Removed %s (sim)"):format(name))
+        if resolved == "/sync_jobs.sh" then
+            markWannaWailFlag(WANNAWAIL_ATTR_LOADER_REMOVED, true)
+        end
     else
         addLine(("rm: cannot remove '%s': No such file (sim)"):format(tostring(path)))
     end
@@ -1429,10 +2101,39 @@ for i, p in ipairs(processes) do
 if p.pid == pid then
 addLine(("Terminated PID %d (%s) (sim)"):format(pid, p.name))
 table.remove(processes, i)
+if pid == 1337 then
+markWannaWailFlag(WANNAWAIL_ATTR_PROCESS_KILLED, true)
+end
 return
 end
 end
 addLine(("kill: %d: no such process (sim)"):format(pid))
+end
+local function fakeFirewall(rawInput)
+local trimmed = tostring(rawInput or ""):gsub("^%s+", ""):gsub("%s+$", "")
+if trimmed == "" then
+addLine("Try: firewall add deny 203.44.18.77")
+return
+end
+local tokens = {}
+for token in trimmed:gmatch("%S+") do
+tokens[#tokens + 1] = token:lower()
+end
+local ip = nil
+if tokens[1] == "add" and (tokens[2] == "deny" or tokens[2] == "block") then
+ip = tokens[3]
+elseif tokens[1] == "deny" or tokens[1] == "block" then
+ip = tokens[2]
+end
+if not ip or ip == "" then
+addLine("Try: firewall add deny 203.44.18.77")
+return
+end
+addLine(("Firewall deny rule staged for %s (sim)"):format(ip))
+if ip == WANNAWAIL_ATTACKER_IP then
+markWannaWailFlag(WANNAWAIL_ATTR_FIREWALL_BLOCKED, true)
+addLine("Hostile source deny rule mirrored on PlayerData_Vault.")
+end
 end
 local function fakePasswd(pw)
 local s = tostring(pw or "")
@@ -1509,26 +2210,52 @@ return
 end
 addLine(("%s ip=%s mac=%s"):format(host.label, host.ip, host.mac))
 end
-local function phishCheck(text)
+local function analyzePhishingText(text)
 local t = (text or ""):lower()
 local flags = 0
 local clues = {}
 local function flag(clue)
 flags = flags + 1
-table.insert(clues, "- " .. clue)
+table.insert(clues, clue)
 end
 if t:find("urgent") or t:find("immediately") then flag("It tries to rush you.") end
 if t:find("password") or t:find("verify") then flag("It asks for credentials or account verification.") end
 if t:find("free") or t:find("winner") or t:find("prize") then flag("It offers a too-good-to-be-true reward.") end
 if t:find("gift card") then flag("Gift card request is a common scam sign.") end
 if t:find("click") and (t:find("link") or t:find("http")) then flag("It pushes you to click a link.") end
+return flags, clues
+end
+local function phishCheck(text)
+local raw = tostring(text or "")
+local targetText = raw
+local targetLower = raw:lower()
+if targetLower == "inbox" or targetLower == "email" then
+if browserState.currentUrl ~= "mail.bloxplay.com" and browserState.currentUrl ~= "www.mail.bloxplay.com" then
+addLine("baitcheck (sim): open mail.bloxplay.com first.")
+return
+end
+local selectedMail = browserState._getMailEntryById and browserState._getMailEntryById(browserState.selectedMailId) or nil
+if not selectedMail then
+addLine("baitcheck (sim): select an inbox message first.")
+return
+end
+targetText = tostring(selectedMail.body or "")
+addLine(('baitcheck (sim): analyzing "%s" from %s'):format(
+ tostring(selectedMail.subject or "Untitled message"),
+ tostring(selectedMail.sender or "unknown sender")
+))
+end
+local flags, clues = analyzePhishingText(targetText)
 if flags == 0 then
 addLine("baitcheck (sim): message looks calmer, but still verify the sender.")
 else
 addLine(("baitcheck (sim): %d suspicious clue(s) found:"):format(flags))
-for _, c in ipairs(clues) do
-addLine(c)
+for _, clue in ipairs(clues) do
+addLine("- " .. clue)
 end
+end
+if targetLower == "inbox" or targetLower == "email" then
+setBrowserStatus("BaitCheck reviewed the selected email. Use Report or Pass Through in BloxMail.")
 end
 end
 local function decoyMail(text)
@@ -1569,7 +2296,7 @@ addLine("help - show this list")
 addLine("hint - show a clue for the current objective")
 addLine("apps - list apps")
 addLine("open <terminal|browser|notes> - switch screens")
-addLine("visit <url|home|tips|apps> - open a page (sim)")
+addLine("visit <url|home|tips|apps|mail> - open a page (sim)")
 addLine("scan [nearby|ip] - scan nearby devices/host (sim)")
 addLine("sniff [ip] - capture fake packet traffic (sim)")
 addLine("packets [ip] - packet analyzer summary (sim)")
@@ -1598,20 +2325,58 @@ addLine("baitcheck <text> - detect phishing clues (sim)")
 addLine("decoymail <text> - inspect suspicious email tone (sim)")
 addLine("crack-ng <target> - password policy audit (sim)")
 addLine("admin <on|off> - toggle admin mode (sim)")
-addLine("save - save your mission progress")
-addLine("load - use Load Saved Progress on the start screen")
+addLine("save - force an immediate autosave")
+addLine("continue - use Continue on the start screen")
 addLine("clear - clear terminal")
 addLine("time - show time")
-addLine("Browser links: hackos://home, bloxplay.com/admin, RBXPacketNet.com")
+addLine("Browser links: hackos://home, mail.bloxplay.com, bloxplay.com/admin, RBXPacketNet.com, RBXIPBlocker.com")
 end
+
+simOps.showHelp = showHelp
+simOps.showScan = showScan
+simOps.showSniff = showSniff
+simOps.showPackets = showPackets
+simOps.showDevices = showDevices
+simOps.showMac = showMac
+simOps.fakeConnect = fakeConnect
+simOps.fakeSSH = fakeSSH
+simOps.fakeExit = fakeExit
+simOps.fakeNetstat = fakeNetstat
+simOps.showWorkingDirectory = showWorkingDirectory
+simOps.changeDirectory = changeDirectory
+simOps.fakePsrep = fakePsrep
+simOps.fakeGrep = fakeGrep
+simOps.fakeMalwareScan = fakeMalwareScan
+simOps.fakeFirewall = fakeFirewall
+simOps.fakeKill = fakeKill
+simOps.listPath = listPath
+simOps.showStat = showStat
+simOps.findEntries = findEntries
+simOps.catFile = catFile
+simOps.openFile = openFile
+simOps.closeFile = closeFile
+simOps.removeFile = removeFile
+simOps.fakePasswd = fakePasswd
+simOps.phishCheck = phishCheck
+simOps.decoyMail = decoyMail
+simOps.fakeCrackNG = fakeCrackNG
+browserState._markWannaWailFlag = markWannaWailFlag
+end
+
 local function resetUI()
+local previousBrowserState = browserState
 if TermOut then
 TermOut:ClearAllChildren()
 mk("UIListLayout", { Parent = TermOut, Name = "UIListLayout", Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
 addLine(PROMPT)
 end
 if TermInput then TermInput.Text = "" end
-browserState = { adminLoggedIn = false, currentUrl = "about:blank", stickyNoteInspected = false }
+browserState = { adminLoggedIn = false, currentUrl = "about:blank", stickyNoteInspected = false, adminTab = "database", blockedIPs = {}, selectedMailId = type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or "", logStreamStartedAt = 0, logsLastRender = 0, lastInteractionAt = os.clock(), idleAutoSaveNotified = false }
+for key, value in pairs(previousBrowserState or {}) do
+if type(key) == "string" and key:sub(1, 1) == "_" then
+browserState[key] = value
+end
+end
 terminalState = {
 currentHost = "local",
 currentDir = "/",
@@ -1631,8 +2396,247 @@ if BrowserFrame and BrowserFrame.Visible then navigateTo("about:blank") end
 Player:SetAttribute("Obj_Admin", false)
 applyPendingRestoreState()
 end
+
 local function getScenarioRemote(name)
 return getRemote(name)
+end
+local function buildReplayPromptGUI()
+if ReplayPromptGUI then
+return ReplayPromptGUI
+end
+local gui = mk("ScreenGui", {
+Parent = PlayerGui,
+Name = "HackTabletReplayPrompt",
+IgnoreGuiInset = true,
+ResetOnSpawn = false,
+DisplayOrder = 250,
+Enabled = false,
+})
+local shade = mk("TextButton", {
+Parent = gui,
+AutoButtonColor = false,
+Modal = true,
+Text = "",
+Size = UDim2.fromScale(1, 1),
+BackgroundColor3 = Color3.fromRGB(4, 7, 12),
+BackgroundTransparency = 0.18,
+})
+local panel = mk("Frame", {
+Parent = shade,
+BackgroundColor3 = Color3.fromRGB(15, 20, 32),
+Size = UDim2.fromOffset(460, 250),
+Position = UDim2.fromScale(0.5, 0.5),
+AnchorPoint = Vector2.new(0.5, 0.5),
+})
+round(panel, 18)
+mk("TextLabel", {
+Parent = panel,
+BackgroundTransparency = 1,
+Font = Enum.Font.GothamBlack,
+TextSize = 26,
+TextColor3 = Color3.fromRGB(235, 242, 255),
+Text = "MISSION COMPLETE",
+Size = UDim2.new(1, -40, 0, 34),
+Position = UDim2.new(0, 20, 0, 22),
+})
+mk("TextLabel", {
+Parent = panel,
+BackgroundTransparency = 1,
+Font = Enum.Font.Gotham,
+TextSize = 16,
+TextColor3 = Color3.fromRGB(186, 201, 228),
+TextWrapped = true,
+Text = "You finished Chapter 4. Do you want to play the operation again from the beginning?",
+Size = UDim2.new(1, -40, 0, 58),
+Position = UDim2.new(0, 20, 0, 68),
+})
+mk("TextLabel", {
+Parent = panel,
+BackgroundTransparency = 1,
+Font = Enum.Font.GothamSemibold,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(255, 194, 102),
+TextWrapped = true,
+Text = "Your autosave has been removed, so Continue will show No Save Found.",
+Size = UDim2.new(1, -40, 0, 40),
+Position = UDim2.new(0, 20, 0, 132),
+})
+local playAgainBtn = mk("TextButton", {
+Parent = panel,
+Name = "PlayAgainButton",
+AutoButtonColor = true,
+Text = "PLAY AGAIN",
+Font = Enum.Font.GothamBold,
+TextSize = 15,
+TextColor3 = Color3.new(1, 1, 1),
+BackgroundColor3 = Color3.fromRGB(79, 131, 255),
+BorderSizePixel = 0,
+Size = UDim2.new(0, 170, 0, 42),
+Position = UDim2.new(0.5, -182, 1, -62),
+})
+round(playAgainBtn, 12)
+local doneBtn = mk("TextButton", {
+Parent = panel,
+Name = "DoneButton",
+AutoButtonColor = true,
+Text = "NOT NOW",
+Font = Enum.Font.GothamBold,
+TextSize = 15,
+TextColor3 = Color3.fromRGB(220, 231, 248),
+BackgroundColor3 = Color3.fromRGB(46, 57, 79),
+BorderSizePixel = 0,
+Size = UDim2.new(0, 170, 0, 42),
+Position = UDim2.new(0.5, 12, 1, -62),
+})
+round(doneBtn, 12)
+ReplayPromptGUI = gui
+return gui
+end
+local function setReplayPromptVisible(visible)
+if not ReplayPromptGUI then
+buildReplayPromptGUI()
+end
+if ReplayPromptGUI then
+ReplayPromptGUI.Enabled = visible == true
+end
+end
+local function clearEndingAutosave()
+if replayPromptClearDone then
+return
+end
+autoSaveSuppressed = true
+autoSaveQueuedAt = 0
+replayPromptClearDone = true
+local clearRemote = getScenarioRemote("ClearSavedProgress")
+if not clearRemote then
+return
+end
+local ok, result = pcall(function()
+return clearRemote:InvokeServer()
+end)
+if ok and type(result) == "table" and type(result.warning) == "string" and result.warning ~= "" then
+warn("[HackTablet] ClearSavedProgress warning:", result.warning)
+elseif not ok then
+warn("[HackTablet] ClearSavedProgress invoke failed")
+end
+end
+local function startReplayRun()
+local startOverRemote = getScenarioRemote(START_OVER_REMOTE_NAME)
+if not startOverRemote then
+notify({ Title = "HackTablet", Text = "Start Over is unavailable right now.", Duration = 3 })
+return
+end
+local promptGui = buildReplayPromptGUI()
+local playAgainBtn = promptGui:FindFirstChild("PlayAgainButton", true)
+local doneBtn = promptGui:FindFirstChild("DoneButton", true)
+if playAgainBtn and playAgainBtn:IsA("TextButton") then
+playAgainBtn.Text = "STARTING..."
+playAgainBtn.Active = false
+playAgainBtn.Selectable = false
+end
+if doneBtn and doneBtn:IsA("TextButton") then
+doneBtn.Active = false
+doneBtn.Selectable = false
+end
+local okReset, resetResult = pcall(function()
+return startOverRemote:InvokeServer()
+end)
+if playAgainBtn and playAgainBtn:IsA("TextButton") then
+playAgainBtn.Text = "PLAY AGAIN"
+playAgainBtn.Active = true
+playAgainBtn.Selectable = true
+end
+if doneBtn and doneBtn:IsA("TextButton") then
+doneBtn.Active = true
+doneBtn.Selectable = true
+end
+if not okReset or type(resetResult) ~= "table" or not resetResult.success then
+notify({ Title = "HackTablet", Text = type(resetResult) == "table" and tostring(resetResult.message or "Could not start over.") or "Could not start over.", Duration = 3 })
+return
+end
+autoSaveSuppressed = false
+autoSaveQueuedAt = 0
+autoSaveLastRunAt = os.clock()
+replayPromptShown = false
+replayPromptClearDone = false
+Player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
+resetUI()
+local loadScenarioRemote = getScenarioRemote("LoadScenario")
+if not loadScenarioRemote then
+notify({ Title = "HackTablet", Text = "Could not load Chapter 1.", Duration = 3 })
+return
+end
+local okLoad, loadResult = pcall(function()
+return loadScenarioRemote:InvokeServer("Chapter1_Recon")
+end)
+if not okLoad or type(loadResult) ~= "table" then
+notify({ Title = "HackTablet", Text = "Could not load Chapter 1.", Duration = 3 })
+return
+end
+setReplayPromptVisible(false)
+if HintGUI then
+HintGUI.Enabled = false
+end
+if MainGUI then
+MainGUI.Enabled = true
+end
+started = true
+if browserState._ensureClockLoop then
+browserState._ensureClockLoop()
+end
+if browserState._updateClockLabel then
+browserState._updateClockLabel()
+end
+playAudio()
+if TermFrame then
+TermFrame.Visible = false
+end
+if BrowserFrame then
+BrowserFrame.Visible = false
+end
+if MissionsFrame then
+MissionsFrame.Visible = true
+end
+if browserState._refreshMissionPanels then
+browserState._refreshMissionPanels()
+end
+if browserState._markInteraction then
+browserState._markInteraction()
+end
+notify({ Title = "HackTablet", Text = "Fresh run loaded. Check your tablet instructions.", Duration = 4 })
+end
+local function showReplayPrompt()
+if replayPromptShown then
+return
+end
+replayPromptShown = true
+clearEndingAutosave()
+autoSaveSuppressed = true
+autoSaveQueuedAt = 0
+stopAudio()
+if TermInput then
+pcall(function()
+TermInput:ReleaseFocus()
+end)
+end
+local promptGui = buildReplayPromptGUI()
+local playAgainBtn = promptGui:FindFirstChild("PlayAgainButton", true)
+local doneBtn = promptGui:FindFirstChild("DoneButton", true)
+if playAgainBtn and playAgainBtn:IsA("TextButton") then
+playAgainBtn.MouseButton1Click:Once(function()
+startReplayRun()
+end)
+end
+if doneBtn and doneBtn:IsA("TextButton") then
+doneBtn.MouseButton1Click:Once(function()
+setReplayPromptVisible(false)
+if isToolEquipped() and started then
+playAudio()
+end
+notify({ Title = "HackTablet", Text = "Autosave removed. Continue will show No Save Found.", Duration = 4 })
+end)
+end
+setReplayPromptVisible(true)
 end
 local function syncScenarioProgress(raw, options)
 options = options or {}
@@ -1646,8 +2650,16 @@ end)
 if not ok or type(result) ~= "table" then
 return nil
 end
+local completedScenarioId = tostring(result.completedScenarioId or "")
+local finalChapterComplete = result.success and result.chapterComplete and completedScenarioId == "Chapter4_IncidentResponse"
+if result.success and not finalChapterComplete then
+queueAutoSave(result.stepComplete or result.chapterComplete)
+end
 if not options.silent and result.success and (result.stepComplete or result.chapterComplete) and type(result.feedback) == "string" and result.feedback ~= "" then
 addLine(result.feedback)
+end
+if finalChapterComplete then
+task.defer(showReplayPrompt)
 end
 return result
 end
@@ -1663,6 +2675,307 @@ if ok and type(sessionInfo) == "table" then
 return sessionInfo
 end
 return nil
+end
+
+browserState._getMailEntryById = function(emailId)
+if type(emailId) == "string" and emailId ~= "" then
+for _, entry in ipairs(CHAPTER3_MAILBOX) do
+if type(entry) == "table" and tostring(entry.id or "") == emailId then
+return entry
+end
+end
+end
+return type(CHAPTER3_MAILBOX[1]) == "table" and CHAPTER3_MAILBOX[1] or nil
+end
+browserState._getMailTriageState = function()
+local sessionInfo = getScenarioSessionInfo()
+if type(sessionInfo) ~= "table" or sessionInfo.scenarioId ~= "Chapter3_Malware" then
+return {
+currentStepId = nil,
+resolved = {},
+actions = {},
+resolvedCount = 0,
+total = #CHAPTER3_MAILBOX,
+}
+end
+local stepState = type(sessionInfo.stepState) == "table" and type(sessionInfo.stepState.ch3_inbox_triage) == "table" and sessionInfo.stepState.ch3_inbox_triage or {}
+local resolved = type(stepState.resolved) == "table" and stepState.resolved or {}
+local actions = type(stepState.actions) == "table" and stepState.actions or {}
+local resolvedCount = 0
+for _, entry in ipairs(CHAPTER3_MAILBOX) do
+if type(entry) == "table" and resolved[tostring(entry.id or "")] == true then
+resolvedCount = resolvedCount + 1
+end
+end
+return {
+sessionInfo = sessionInfo,
+currentStepId = sessionInfo.stepId,
+resolved = resolved,
+actions = actions,
+resolvedCount = resolvedCount,
+total = #CHAPTER3_MAILBOX,
+}
+end
+browserState._ensureChapter3MailVisible = function()
+if not MainGUI or not MainGUI.Enabled or not BrowserFrame or not TermFrame then
+return
+end
+local sessionInfo = getScenarioSessionInfo()
+if type(sessionInfo) ~= "table" or sessionInfo.scenarioId ~= "Chapter3_Malware" then
+browserState.mailAutoOpenStepId = nil
+return
+end
+local stepId = tostring(sessionInfo.stepId or "")
+if stepId ~= "ch3_mail_site" and stepId ~= "ch3_inbox_triage" then
+browserState.mailAutoOpenStepId = nil
+return
+end
+if browserState.mailAutoOpenStepId == stepId then
+return
+end
+browserState.mailAutoOpenStepId = stepId
+TermFrame.Visible = false
+BrowserFrame.Visible = true
+if stepId == "ch3_mail_site" then
+navigateTo("mail.bloxplay.com")
+else
+browserState.currentUrl = "mail.bloxplay.com"
+if UrlBox then
+UrlBox.Text = "mail.bloxplay.com"
+end
+showMailPage("mail.bloxplay.com")
+setBrowserStatus("BloxMail reopened for the Chapter 3 inbox triage step.")
+end
+end
+browserState._renderMailPage = function()
+local mailPage = BrowserContent and BrowserContent:FindFirstChild("MailPage")
+if not mailPage then return end
+local inboxList = mailPage:FindFirstChild("MailInboxList")
+local detailCard = mailPage:FindFirstChild("MailDetailCard")
+if not inboxList or not detailCard then return end
+local triageState = browserState._getMailTriageState and browserState._getMailTriageState() or { resolved = {}, actions = {}, resolvedCount = 0, total = #CHAPTER3_MAILBOX }
+local summaryLabel = mailPage:FindFirstChild("MailInboxSummary")
+if (browserState.selectedMailId == nil or browserState.selectedMailId == "") and type(CHAPTER3_MAILBOX[1]) == "table" then
+browserState.selectedMailId = tostring(CHAPTER3_MAILBOX[1].id or "")
+end
+local selectedMail = browserState._getMailEntryById and browserState._getMailEntryById(browserState.selectedMailId) or nil
+if selectedMail then
+browserState.selectedMailId = tostring(selectedMail.id or "")
+end
+for _, child in ipairs(inboxList:GetChildren()) do
+if child:IsA("GuiButton") or child:IsA("Frame") then
+child:Destroy()
+end
+end
+if summaryLabel and summaryLabel:IsA("TextLabel") then
+local pendingCount = math.max(0, triageState.total - triageState.resolvedCount)
+if #CHAPTER3_MAILBOX == 0 then
+summaryLabel.Text = "Inbox queue unavailable. Reloading fallback mail data."
+elseif triageState.currentStepId == "ch3_inbox_triage" then
+summaryLabel.Text = ("%d total emails. %d resolved, %d still waiting in the left inbox queue."):format(triageState.total, triageState.resolvedCount, pendingCount)
+elseif triageState.resolvedCount >= triageState.total and triageState.total > 0 then
+summaryLabel.Text = "Inbox triage is complete. Move to the live incident logs next."
+else
+summaryLabel.Text = "Use the left inbox queue to inspect each message, then choose Report or Pass Through."
+end
+end
+if #CHAPTER3_MAILBOX == 0 then
+local emptyRow = mk("Frame", {
+Parent = inboxList,
+BackgroundColor3 = Color3.fromRGB(243, 246, 251),
+BorderSizePixel = 0,
+Size = UDim2.new(1, -8, 0, 58),
+})
+round(emptyRow, 8)
+mk("TextLabel", {
+Parent = emptyRow,
+BackgroundTransparency = 1,
+Text = "Inbox unavailable (sim).",
+Font = Enum.Font.Gotham,
+TextSize = 14,
+TextColor3 = Color3.fromRGB(75, 84, 98),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 18),
+Size = UDim2.new(1, -24, 0, 20),
+})
+else
+for index, entry in ipairs(CHAPTER3_MAILBOX) do
+local emailId = tostring(entry.id or ("mail_" .. index))
+local isSelected = browserState.selectedMailId == emailId
+local resolvedAction = triageState.actions[emailId]
+local statusText = "Pending"
+local chipColor = Color3.fromRGB(152, 163, 179)
+local rowColor = isSelected and Color3.fromRGB(228, 236, 248) or Color3.fromRGB(244, 247, 252)
+if resolvedAction == "report" then
+statusText = "Reported"
+chipColor = Color3.fromRGB(191, 71, 58)
+rowColor = isSelected and Color3.fromRGB(250, 234, 231) or Color3.fromRGB(252, 242, 239)
+elseif resolvedAction == "pass" then
+statusText = "Passed"
+chipColor = Color3.fromRGB(61, 136, 92)
+rowColor = isSelected and Color3.fromRGB(229, 244, 234) or Color3.fromRGB(240, 249, 242)
+end
+local preview = tostring(entry.body or ""):gsub("%s+", " "):sub(1, 72)
+if #preview == 72 then
+preview = preview .. "..."
+end
+local row = mk("TextButton", {
+Parent = inboxList,
+BackgroundColor3 = rowColor,
+BorderSizePixel = 0,
+ClipsDescendants = true,
+AutoButtonColor = false,
+Text = "",
+Size = UDim2.new(1, -8, 0, 92),
+})
+round(row, 8)
+row.MouseButton1Click:Connect(function()
+browserState.selectedMailId = emailId
+queueAutoSave(false)
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+end)
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = tostring(entry.subject or "Untitled message"),
+TextTruncate = Enum.TextTruncate.AtEnd,
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(25, 30, 38),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 10),
+Size = UDim2.new(1, -108, 0, 18),
+})
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = tostring(entry.sender or "Unknown sender"),
+TextTruncate = Enum.TextTruncate.AtEnd,
+Font = Enum.Font.Code,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(76, 86, 102),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 30),
+Size = UDim2.new(1, -108, 0, 16),
+})
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+TextWrapped = true,
+TextYAlignment = Enum.TextYAlignment.Top,
+Text = preview,
+Font = Enum.Font.Gotham,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(86, 94, 108),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 50),
+Size = UDim2.new(1, -108, 0, 32),
+})
+local chip = mk("TextLabel", {
+Parent = row,
+BackgroundColor3 = chipColor,
+BorderSizePixel = 0,
+Text = statusText,
+Font = Enum.Font.GothamBold,
+TextSize = 11,
+TextColor3 = Color3.new(1, 1, 1),
+Position = UDim2.new(1, -84, 0, 12),
+Size = UDim2.new(0, 72, 0, 20),
+})
+round(chip, 6)
+end
+end
+task.defer(function()
+local layout = inboxList:FindFirstChild("UIListLayout")
+inboxList.CanvasSize = UDim2.new(0, 0, 0, ((layout and layout.AbsoluteContentSize.Y) or 0) + 10)
+end)
+selectedMail = browserState._getMailEntryById and browserState._getMailEntryById(browserState.selectedMailId) or nil
+local senderLabel = detailCard:FindFirstChild("MailDetailSender")
+local subjectLabel = detailCard:FindFirstChild("MailDetailSubject")
+local bodyFrame = detailCard:FindFirstChild("MailDetailBodyFrame")
+local bodyLabel = detailCard:FindFirstChild("MailDetailBody")
+local statusLabel = detailCard:FindFirstChild("MailStatusLabel")
+local actionHintLabel = detailCard:FindFirstChild("MailActionHintLabel")
+local reportButton = detailCard:FindFirstChild("MailReportButton")
+local passButton = detailCard:FindFirstChild("MailPassButton")
+if senderLabel and senderLabel:IsA("TextLabel") then
+senderLabel.Text = "FROM: " .. tostring(selectedMail and selectedMail.sender or "No sender selected")
+end
+if subjectLabel and subjectLabel:IsA("TextLabel") then
+subjectLabel.Text = "SUBJECT: " .. tostring(selectedMail and selectedMail.subject or "No message selected")
+end
+if bodyLabel and bodyLabel:IsA("TextLabel") then
+bodyLabel.Text = tostring(selectedMail and selectedMail.body or "Select a message from the inbox to inspect it.")
+end
+if bodyFrame and bodyFrame:IsA("ScrollingFrame") then
+bodyFrame.CanvasPosition = Vector2.new(0, 0)
+end
+local selectedAction = selectedMail and triageState.actions[tostring(selectedMail.id or "")] or nil
+local canClassify = selectedMail ~= nil and triageState.currentStepId == "ch3_inbox_triage" and selectedAction == nil
+if statusLabel and statusLabel:IsA("TextLabel") then
+if triageState.total == 0 then
+statusLabel.Text = "Inbox unavailable."
+elseif selectedAction == "report" then
+statusLabel.Text = "This message is already classified as REPORTED."
+elseif selectedAction == "pass" then
+statusLabel.Text = "This message is already classified as PASSED."
+elseif triageState.currentStepId == "ch3_inbox_triage" then
+statusLabel.Text = ("%d/%d messages classified. Finish the full queue before the incident escalates."):format(triageState.resolvedCount, triageState.total)
+elseif triageState.resolvedCount >= triageState.total and triageState.total > 0 then
+statusLabel.Text = "Inbox triage complete. Move to the admin Security Logs tab."
+else
+statusLabel.Text = "Review the selected message before deciding whether it should be reported."
+end
+end
+if actionHintLabel and actionHintLabel:IsA("TextLabel") then
+actionHintLabel.Text = canClassify and "Report phishing mail. Pass Through legitimate internal mail." or "Classification buttons unlock only during the Chapter 3 inbox triage step."
+end
+if reportButton and reportButton:IsA("TextButton") then
+reportButton.Active = canClassify
+reportButton.AutoButtonColor = canClassify
+reportButton.BackgroundColor3 = canClassify and Color3.fromRGB(184, 61, 61) or Color3.fromRGB(154, 161, 170)
+reportButton.TextTransparency = canClassify and 0 or 0.18
+end
+if passButton and passButton:IsA("TextButton") then
+passButton.Active = canClassify
+passButton.AutoButtonColor = canClassify
+passButton.BackgroundColor3 = canClassify and Color3.fromRGB(63, 142, 96) or Color3.fromRGB(154, 161, 170)
+passButton.TextTransparency = canClassify and 0 or 0.18
+end
+end
+browserState._classifySelectedMail = function(action)
+local selectedMail = browserState._getMailEntryById and browserState._getMailEntryById(browserState.selectedMailId) or nil
+if not selectedMail then
+setBrowserStatus("No inbox message selected.")
+return
+end
+local triageState = browserState._getMailTriageState and browserState._getMailTriageState() or { currentStepId = nil, resolvedCount = 0, total = #CHAPTER3_MAILBOX }
+if triageState.currentStepId ~= "ch3_inbox_triage" then
+if triageState.total > 0 and triageState.resolvedCount >= triageState.total then
+setBrowserStatus("Inbox triage already complete.")
+else
+setBrowserStatus("The Chapter 3 inbox triage step is not active right now.")
+end
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+return
+end
+local result = submitScenarioAction and submitScenarioAction(("browser_mail %s %s"):format(tostring(selectedMail.id or ""), tostring(action or "report")), { "ch3_inbox_triage" })
+if result and result.stepComplete then
+setBrowserStatus("Inbox triage complete. WannaWail activity is now hitting office systems.")
+elseif result and result.success then
+setBrowserStatus(type(result.feedback) == "string" and result.feedback ~= "" and result.feedback or "Message classified.")
+elseif result and type(result.output) == "string" and result.output ~= "" then
+setBrowserStatus(result.output:gsub('%s+', ' '))
+else
+setBrowserStatus("Review the selected mail before classifying it.")
+end
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
 end
 local function scenarioStepMatches(stepIds)
 if type(stepIds) ~= "table" or #stepIds == 0 then
@@ -1680,7 +2993,7 @@ end
 end
 return false
 end
-local function submitScenarioAction(raw, stepIds)
+submitScenarioAction = function(raw, stepIds)
 if not scenarioStepMatches(stepIds) then
 return nil
 end
@@ -1709,6 +3022,7 @@ for w in raw:gmatch("%S+") do
 args[#args + 1] = w
 end
 local cmd = (args[1] or ""):lower()
+local simOps = browserState._simOps or {}
 if cmd == "" then
 addLine(PROMPT)
 return
@@ -1735,11 +3049,11 @@ tokens[#tokens] = nil
 return table.concat(tokens, " "), lastToken
 end
 if cmd == "help" then
-showHelp()
+simOps.showHelp()
 elseif cmd == "hint" then
 showScenarioHint()
 elseif cmd == "apps" then
-addLine("Apps (SIM): terminal, browser, notes (soon), RBXPacketNet, admin portal")
+addLine("Apps (SIM): terminal, browser, BloxMail, RBXPacketNet, admin portal, RBXIPBlocker")
 addLine("Tip: open browser")
 elseif cmd == "open" then
 local which = (args[2] or ""):lower()
@@ -1772,60 +3086,62 @@ addLine("Opening " .. (target ~= "" and target or "about:blank") .. " ... (sim)"
 if UrlBox then UrlBox.Text = target end
 navigateTo(target)
 elseif cmd == "scan" then
-showScan(rest(2))
+simOps.showScan(rest(2))
 elseif cmd == "sniff" then
-showSniff(rest(2))
+simOps.showSniff(rest(2))
 elseif cmd == "packets" then
-showPackets(rest(2))
+simOps.showPackets(rest(2))
 elseif cmd == "devices" then
-showDevices()
+simOps.showDevices()
 elseif cmd == "mac" then
-showMac(args[2] or "")
+simOps.showMac(args[2] or "")
 elseif cmd == "connect" then
-fakeConnect(rest(2))
+simOps.fakeConnect(rest(2))
 elseif cmd == "ssh" then
-fakeSSH(rest(2))
+simOps.fakeSSH(rest(2))
 elseif cmd == "exit" then
-fakeExit()
+simOps.fakeExit()
 elseif cmd == "netstat" then
-fakeNetstat()
+simOps.fakeNetstat()
 elseif cmd == "pwd" then
-showWorkingDirectory()
+simOps.showWorkingDirectory()
 elseif cmd == "cd" then
-changeDirectory(rest(2))
+simOps.changeDirectory(rest(2))
 elseif cmd == "psrep" or (cmd == "ps" and (args[2] or "") == "aux") then
-fakePsrep()
+simOps.fakePsrep()
 elseif cmd == "grep" then
 local pattern, file = parseQuotedAndFile(rest(2))
-fakeGrep(pattern, file)
+simOps.fakeGrep(pattern, file)
 elseif cmd == "malwarescan" then
-fakeMalwareScan()
+simOps.fakeMalwareScan()
+elseif cmd == "firewall" then
+simOps.fakeFirewall(rest(2))
 elseif cmd == "kill" then
-fakeKill(args[2] or "")
+simOps.fakeKill(args[2] or "")
 elseif cmd == "ls" then
-listPath(rest(2))
+simOps.listPath(rest(2))
 elseif cmd == "stat" then
-showStat(rest(2))
+simOps.showStat(rest(2))
 elseif cmd == "find" then
-findEntries(rest(2))
+simOps.findEntries(rest(2))
 elseif cmd == "cat" then
-catFile(rest(2))
+simOps.catFile(rest(2))
 elseif cmd == "openfile" then
-openFile(rest(2))
+simOps.openFile(rest(2))
 elseif cmd == "closefile" then
-closeFile(rest(2))
+simOps.closeFile(rest(2))
 elseif cmd == "echo" then
 addLine(rest(2))
 elseif cmd == "rm" then
-removeFile(rest(2))
+simOps.removeFile(rest(2))
 elseif cmd == "passwd" then
-fakePasswd(rest(2))
+simOps.fakePasswd(rest(2))
 elseif cmd == "baitcheck" then
-phishCheck(rest(2))
+simOps.phishCheck(rest(2))
 elseif cmd == "decoymail" then
-decoyMail(rest(2))
+simOps.decoyMail(rest(2))
 elseif cmd == "crack-ng" then
-fakeCrackNG(rest(2))
+simOps.fakeCrackNG(rest(2))
 elseif cmd == "admin" then
 local on = (args[2] or ""):lower() == "on"
 Player:SetAttribute("Obj_Admin", on)
@@ -1834,9 +3150,11 @@ browserState.adminLoggedIn = true
 end
 addLine("Admin mode (sim) = " .. tostring(on))
 elseif cmd == "save" then
-saveNow()
-elseif cmd == "load" then
-addLine("Use Load Saved Progress on the start screen.")
+if saveNow({ force = true }) then
+addLine("Autosave completed.")
+end
+elseif cmd == "load" or cmd == "continue" then
+addLine("Use Continue on the start screen.")
 elseif cmd == "time" then
 addLine(os.date("%Y-%m-%d %H:%M:%S"))
 elseif cmd == "clear" or cmd == "reset" then
@@ -1969,7 +3287,6 @@ end
 local bTerm = button("Terminal", 180, 80)
 local bBrowser = button("Browser", 265, 80)
 local bMissions = button("Missions", 350, 80)
-local bSave = button("Save", 435, 149)
 local pad = mk("Frame", {
 Parent = desktop,
 Position = UDim2.new(0, 14, 0, 64),
@@ -2151,6 +3468,7 @@ Size = UDim2.new(1, -16, 0, 24),
 buildQuickLink(LinkBar, "HackOS Home", "hackos://home", 0)
 buildQuickLink(LinkBar, "PacketNet", "rbxpacketnet.com", 118)
 buildQuickLink(LinkBar, "Admin Portal", "bloxplay.com/admin", 236)
+buildQuickLink(LinkBar, "IP Blocker", "rbxipblocker.com", 354)
 BrowserContent = mk("Frame", {
 Parent = BrowserFrame,
 BackgroundColor3 = Color3.fromRGB(250, 251, 253),
@@ -2274,46 +3592,16 @@ TextColor3 = Color3.fromRGB(90, 100, 118),
 Size = UDim2.new(1, -30, 0, 20),
 Position = UDim2.new(0, 15, 0, 233),
 })
-AdminStickyNoteButton = mk("TextButton", {
-Parent = AdminLoginPage,
-Text = "",
-AutoButtonColor = true,
-BackgroundColor3 = Color3.fromRGB(255, 235, 145),
-BorderSizePixel = 0,
-Position = UDim2.new(1, -166, 0, 86),
-Size = UDim2.new(0, 146, 0, 138),
-})
-round(AdminStickyNoteButton, 12)
-mk("UIStroke", {
-Parent = AdminStickyNoteButton,
-Color = Color3.fromRGB(209, 181, 91),
-Thickness = 1,
-})
 mk("TextLabel", {
-Parent = AdminStickyNoteButton,
+Parent = AdminLoginPage,
 BackgroundTransparency = 1,
-Text = "STICKY NOTE",
-Font = Enum.Font.GothamBold,
-TextSize = 14,
-TextColor3 = Color3.fromRGB(105, 78, 19),
-TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 12, 0, 8),
-Size = UDim2.new(1, -24, 0, 18),
-})
-AdminStickyNoteBody = mk("TextLabel", {
-Parent = AdminStickyNoteButton,
-BackgroundTransparency = 1,
-Text = [[Desk Sticky Note
-
-Click to inspect]],
 TextWrapped = true,
-TextXAlignment = Enum.TextXAlignment.Left,
-TextYAlignment = Enum.TextYAlignment.Top,
+Text = "Use the physical office note for credentials.",
 Font = Enum.Font.Gotham,
-TextSize = 13,
-TextColor3 = Color3.fromRGB(76, 61, 23),
-Position = UDim2.new(0, 12, 0, 30),
-Size = UDim2.new(1, -24, 1, -40),
+TextSize = 12,
+TextColor3 = Color3.fromRGB(97, 108, 126),
+Size = UDim2.new(1, -60, 0, 34),
+Position = UDim2.new(0, 30, 0, 258),
 })
 AdminDashboardPage = mk("Frame", {
 Parent = BrowserContent,
@@ -2332,6 +3620,41 @@ Position = UDim2.new(0, 10, 0, 10),
 Size = UDim2.new(1, -20, 0, 28),
 TextXAlignment = Enum.TextXAlignment.Left,
 })
+mk("TextLabel", {
+Parent = AdminDashboardPage,
+BackgroundTransparency = 1,
+Text = "Database records and live incident logging",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(90, 100, 118),
+Position = UDim2.new(0, 10, 0, 38),
+Size = UDim2.new(1, -20, 0, 18),
+TextXAlignment = Enum.TextXAlignment.Left,
+})
+local adminDatabaseTabBtn = mk("TextButton", {
+Parent = AdminDashboardPage,
+Name = "AdminDatabaseTabBtn",
+Text = "Database",
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.new(1, 1, 1),
+BackgroundColor3 = Color3.fromRGB(76, 123, 255),
+Position = UDim2.new(0, 10, 0, 64),
+Size = UDim2.new(0, 104, 0, 28),
+})
+round(adminDatabaseTabBtn, 8)
+local adminLogsTabBtn = mk("TextButton", {
+Parent = AdminDashboardPage,
+Name = "AdminLogsTabBtn",
+Text = "Security Logs",
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.new(1, 1, 1),
+BackgroundColor3 = Color3.fromRGB(100, 110, 132),
+Position = UDim2.new(0, 120, 0, 64),
+Size = UDim2.new(0, 118, 0, 28),
+})
+round(adminLogsTabBtn, 8)
 AdminSearchBox = mk("TextBox", {
 Parent = AdminDashboardPage,
 Text = "",
@@ -2341,7 +3664,7 @@ TextSize = 14,
 TextColor3 = Color3.new(0, 0, 0),
 BackgroundColor3 = Color3.fromRGB(233, 237, 244),
 BorderSizePixel = 0,
-Position = UDim2.new(0, 10, 0, 46),
+Position = UDim2.new(0, 10, 0, 100),
 Size = UDim2.new(1, -20, 0, 34),
 })
 round(AdminSearchBox, 8)
@@ -2350,12 +3673,29 @@ Parent = AdminDashboardPage,
 BackgroundColor3 = Color3.fromRGB(238, 242, 248),
 BorderSizePixel = 0,
 ScrollBarThickness = 6,
-Position = UDim2.new(0, 10, 0, 88),
-Size = UDim2.new(1, -20, 1, -98),
+Position = UDim2.new(0, 10, 0, 142),
+Size = UDim2.new(1, -20, 1, -152),
 })
 round(AdminResultsFrame, 8)
 mk("UIListLayout", {
 Parent = AdminResultsFrame,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
+local adminLogsFrame = mk("ScrollingFrame", {
+Parent = AdminDashboardPage,
+Name = "AdminLogsFrame",
+BackgroundColor3 = Color3.fromRGB(238, 242, 248),
+BorderSizePixel = 0,
+ScrollBarThickness = 6,
+Position = UDim2.new(0, 10, 0, 100),
+Size = UDim2.new(1, -20, 1, -110),
+Visible = false,
+})
+round(adminLogsFrame, 8)
+mk("UIListLayout", {
+Parent = adminLogsFrame,
 Name = "UIListLayout",
 Padding = UDim.new(0, 6),
 SortOrder = Enum.SortOrder.LayoutOrder,
@@ -2470,6 +3810,286 @@ Name = "UIListLayout",
 Padding = UDim.new(0, 6),
 SortOrder = Enum.SortOrder.LayoutOrder,
 })
+local mailPage = mk("Frame", {
+Parent = BrowserContent,
+Name = "MailPage",
+BackgroundTransparency = 1,
+Size = UDim2.fromScale(1, 1),
+Visible = false,
+})
+mk("TextLabel", {
+Parent = mailPage,
+BackgroundTransparency = 1,
+Text = "BloxMail - Staff Inbox Queue",
+Font = Enum.Font.GothamBold,
+TextSize = 20,
+TextColor3 = Color3.fromRGB(24, 30, 38),
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(1, -20, 0, 24),
+TextXAlignment = Enum.TextXAlignment.Left,
+})
+mk("TextLabel", {
+Parent = mailPage,
+Name = "MailInboxSummary",
+BackgroundTransparency = 1,
+TextWrapped = true,
+Text = "Open messages from the left inbox queue, then classify each one before the incident escalates.",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(88, 98, 114),
+Position = UDim2.new(0, 10, 0, 36),
+Size = UDim2.new(1, -20, 0, 24),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
+})
+mk("ScrollingFrame", {
+Parent = mailPage,
+Name = "MailInboxList",
+BackgroundColor3 = Color3.fromRGB(239, 243, 248),
+BorderSizePixel = 0,
+Position = UDim2.new(0, 10, 0, 70),
+Size = UDim2.new(0.44, -16, 1, -80),
+CanvasSize = UDim2.new(0, 0, 0, 0),
+AutomaticCanvasSize = Enum.AutomaticSize.Y,
+ScrollBarThickness = 6,
+ScrollBarImageColor3 = Color3.fromRGB(152, 160, 173),
+})
+round(mailPage:FindFirstChild("MailInboxList"), 10)
+mk("UIListLayout", {
+Parent = mailPage.MailInboxList,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
+mk("Frame", {
+Parent = mailPage,
+Name = "MailDetailCard",
+BackgroundColor3 = Color3.fromRGB(238, 242, 248),
+BorderSizePixel = 0,
+ClipsDescendants = true,
+Position = UDim2.new(0.44, -2, 0, 70),
+Size = UDim2.new(0.56, -8, 1, -80),
+})
+round(mailPage:FindFirstChild("MailDetailCard"), 10)
+mk("TextLabel", {
+Parent = mailPage.MailDetailCard,
+Name = "MailDetailSender",
+BackgroundTransparency = 1,
+TextWrapped = true,
+Text = "FROM:",
+Font = Enum.Font.Code,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(55, 64, 80),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
+Position = UDim2.new(0, 14, 0, 12),
+Size = UDim2.new(1, -28, 0, 22),
+})
+mk("TextLabel", {
+Parent = mailPage.MailDetailCard,
+Name = "MailDetailSubject",
+BackgroundTransparency = 1,
+TextWrapped = true,
+Text = "SUBJECT:",
+Font = Enum.Font.GothamBold,
+TextSize = 15,
+TextColor3 = Color3.fromRGB(25, 30, 38),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
+Position = UDim2.new(0, 14, 0, 38),
+Size = UDim2.new(1, -28, 0, 40),
+})
+mk("ScrollingFrame", {
+Parent = mailPage.MailDetailCard,
+Name = "MailDetailBodyFrame",
+BackgroundColor3 = Color3.fromRGB(248, 250, 253),
+BorderSizePixel = 0,
+Position = UDim2.new(0, 14, 0, 84),
+Size = UDim2.new(1, -28, 0, 186),
+CanvasSize = UDim2.new(0, 0, 0, 0),
+AutomaticCanvasSize = Enum.AutomaticSize.Y,
+ScrollBarThickness = 5,
+ScrollBarImageColor3 = Color3.fromRGB(152, 160, 173),
+ScrollingDirection = Enum.ScrollingDirection.Y,
+ClipsDescendants = true,
+})
+round(mailPage.MailDetailCard.MailDetailBodyFrame, 8)
+mk("TextLabel", {
+Parent = mailPage.MailDetailCard.MailDetailBodyFrame,
+Name = "MailDetailBody",
+BackgroundTransparency = 1,
+AutomaticSize = Enum.AutomaticSize.Y,
+TextWrapped = true,
+TextYAlignment = Enum.TextYAlignment.Top,
+Text = "Select a message from the inbox to inspect it.",
+Font = Enum.Font.Gotham,
+TextSize = 14,
+TextColor3 = Color3.fromRGB(48, 56, 70),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(1, -20, 0, 0),
+})
+mk("TextLabel", {
+Parent = mailPage.MailDetailCard,
+Name = "MailStatusLabel",
+BackgroundTransparency = 1,
+TextWrapped = true,
+Text = "Review the selected message before deciding whether it should be reported.",
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(176, 92, 42),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
+Position = UDim2.new(0, 14, 0, 278),
+Size = UDim2.new(1, -28, 0, 48),
+})
+mk("TextButton", {
+Parent = mailPage.MailDetailCard,
+Name = "MailReportButton",
+BackgroundColor3 = Color3.fromRGB(184, 61, 61),
+BorderSizePixel = 0,
+Text = "Report",
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.new(1, 1, 1),
+Position = UDim2.new(0, 14, 0, 332),
+Size = UDim2.new(0, 112, 0, 34),
+AutoButtonColor = true,
+})
+round(mailPage.MailDetailCard.MailReportButton, 8)
+mk("TextButton", {
+Parent = mailPage.MailDetailCard,
+Name = "MailPassButton",
+BackgroundColor3 = Color3.fromRGB(63, 142, 96),
+BorderSizePixel = 0,
+Text = "Pass Through",
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.new(1, 1, 1),
+Position = UDim2.new(0, 134, 0, 332),
+Size = UDim2.new(0, 132, 0, 34),
+AutoButtonColor = true,
+})
+round(mailPage.MailDetailCard.MailPassButton, 8)
+mk("TextLabel", {
+Parent = mailPage.MailDetailCard,
+Name = "MailActionHintLabel",
+BackgroundTransparency = 1,
+TextWrapped = true,
+Text = "Report phishing mail. Pass Through legitimate internal mail.",
+Font = Enum.Font.Gotham,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(92, 100, 114),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
+Position = UDim2.new(0, 14, 0, 372),
+Size = UDim2.new(1, -28, 0, 44),
+})
+if mailPage.MailDetailCard:FindFirstChild("MailReportButton") then
+mailPage.MailDetailCard.MailReportButton.MouseButton1Click:Connect(function()
+if browserState._classifySelectedMail then
+browserState._classifySelectedMail("report")
+end
+end)
+end
+if mailPage.MailDetailCard:FindFirstChild("MailPassButton") then
+mailPage.MailDetailCard.MailPassButton.MouseButton1Click:Connect(function()
+if browserState._classifySelectedMail then
+browserState._classifySelectedMail("pass")
+end
+end)
+end
+local ipBlockerPage = mk("Frame", {
+Parent = BrowserContent,
+Name = "IPBlockerPage",
+BackgroundTransparency = 1,
+Size = UDim2.fromScale(1, 1),
+Visible = false,
+})
+mk("TextLabel", {
+Parent = ipBlockerPage,
+BackgroundTransparency = 1,
+Text = "RBXIPBlocker",
+Font = Enum.Font.GothamBlack,
+TextSize = 24,
+TextColor3 = Color3.fromRGB(30, 40, 58),
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(1, -20, 0, 28),
+TextXAlignment = Enum.TextXAlignment.Left,
+})
+mk("TextLabel", {
+Parent = ipBlockerPage,
+BackgroundTransparency = 1,
+Text = "Emergency hostile source blocking console (SIM)",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(88, 98, 114),
+Position = UDim2.new(0, 10, 0, 36),
+Size = UDim2.new(1, -20, 0, 18),
+TextXAlignment = Enum.TextXAlignment.Left,
+})
+local ipBlockerToolbar = mk("Frame", {
+Parent = ipBlockerPage,
+BackgroundColor3 = Color3.fromRGB(233, 237, 244),
+BorderSizePixel = 0,
+Position = UDim2.new(0, 10, 0, 62),
+Size = UDim2.new(1, -20, 0, 48),
+})
+round(ipBlockerToolbar, 8)
+local ipBlockerInputBox = mk("TextBox", {
+Parent = ipBlockerToolbar,
+Name = "IPBlockerInputBox",
+Text = "",
+PlaceholderText = "Enter source IP to block",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.new(0, 0, 0),
+BackgroundColor3 = Color3.fromRGB(248, 250, 253),
+BorderSizePixel = 0,
+Position = UDim2.new(0, 8, 0, 9),
+Size = UDim2.new(1, -126, 0, 30),
+})
+round(ipBlockerInputBox, 8)
+local ipBlockerBlockBtn = mk("TextButton", {
+Parent = ipBlockerToolbar,
+Name = "IPBlockerBlockBtn",
+Text = "Block",
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.new(1, 1, 1),
+BackgroundColor3 = Color3.fromRGB(188, 62, 62),
+Position = UDim2.new(1, -110, 0, 9),
+Size = UDim2.new(0, 102, 0, 30),
+})
+round(ipBlockerBlockBtn, 8)
+local ipBlockerStatus = mk("TextLabel", {
+Parent = ipBlockerPage,
+Name = "IPBlockerStatus",
+BackgroundTransparency = 1,
+Text = "Enter a hostile source from the investigation feed.",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(88, 98, 114),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 118),
+Size = UDim2.new(1, -20, 0, 18),
+})
+local ipBlockerHistoryFrame = mk("ScrollingFrame", {
+Parent = ipBlockerPage,
+Name = "IPBlockerHistoryFrame",
+BackgroundColor3 = Color3.fromRGB(238, 242, 248),
+BorderSizePixel = 0,
+ScrollBarThickness = 6,
+Position = UDim2.new(0, 10, 0, 144),
+Size = UDim2.new(1, -20, 1, -154),
+})
+round(ipBlockerHistoryFrame, 8)
+mk("UIListLayout", {
+Parent = ipBlockerHistoryFrame,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
 goBtn.MouseButton1Click:Connect(function()
 navigateTo(UrlBox.Text)
 end)
@@ -2477,44 +4097,80 @@ local function tryAdminLogin()
 local u = tostring((AdminUserBox.Text or ""):lower())
 local p = tostring(AdminPassBox:GetAttribute("RealPassword") or "")
 if u == "bloxplay-admin" and p == "blox123" then
+local result = submitScenarioAction("browser_admin_login bloxplay.com/admin", { "ch2_admin_login" })
 browserState.adminLoggedIn = true
+browserState.adminTab = "database"
 Player:SetAttribute("Obj_Admin", true)
 AdminLoginStatus.Text = "Login successful (sim)"
 AdminPassBox.Text = ""
 AdminPassBox:SetAttribute("RealPassword", "")
 navigateTo("bloxplay.com/admin")
+if result and result.success then
+setBrowserStatus("Admin login accepted. Mission step complete.")
+end
 else
 AdminLoginStatus.Text = "Access denied (sim)"
 AdminPassBox.Text = ""
 AdminPassBox:SetAttribute("RealPassword", "")
 end
 end
-local function inspectAdminStickyNote()
-browserState.stickyNoteInspected = true
-refreshAdminStickyNote()
-if AdminUserBox then
-AdminUserBox.Text = "bloxplay-admin"
-end
-if AdminPassBox then
-AdminPassBox:SetAttribute("RealPassword", "blox123")
-adminPassMasking = true
-AdminPassBox.Text = string.rep("*", #tostring(AdminPassBox:GetAttribute("RealPassword") or ""))
-AdminPassBox.CursorPosition = #AdminPassBox.Text + 1
-adminPassMasking = false
-end
-local result = submitScenarioAction("browser_sticky_note inspect", { "ch2_note" })
-if result and result.success then
-setBrowserStatus("Sticky note inspected. Vault credentials recovered.")
-else
-setBrowserStatus("Sticky note inspected. Admin portal credentials exposed on the desk note.")
-end
-end
 adminLoginBtn.MouseButton1Click:Connect(tryAdminLogin)
-if AdminStickyNoteButton then
-AdminStickyNoteButton.MouseButton1Click:Connect(inspectAdminStickyNote)
+adminDatabaseTabBtn.MouseButton1Click:Connect(function()
+browserState.adminTab = "database"
+showAdminDashboard("bloxplay.com/admin")
+setBrowserStatus("Database records open (sim).")
+end)
+adminLogsTabBtn.MouseButton1Click:Connect(function()
+local result = submitScenarioAction("browser_admin_tab logs", { "ch3_admin_logs" })
+browserState.adminTab = "logs"
+browserState.logsLastRender = 0
+showAdminDashboard("bloxplay.com/admin")
+if result and result.success then
+setBrowserStatus("Security logs opened. Mission step complete.")
+else
+setBrowserStatus("Security logs open (live feed).")
 end
+end)
 AdminSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+if browserState.adminTab ~= "logs" then
 renderAdminResults(AdminSearchBox.Text)
+end
+end)
+ipBlockerBlockBtn.MouseButton1Click:Connect(function()
+local ip = tostring(ipBlockerInputBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+if ip == "" then
+ipBlockerStatus.Text = "Enter a hostile source first."
+setBrowserStatus("RBXIPBlocker needs a source IP.")
+return
+end
+local alreadyBlocked = false
+if type(browserState.blockedIPs) ~= "table" then
+browserState.blockedIPs = {}
+end
+for _, existing in ipairs(browserState.blockedIPs) do
+if existing == ip then
+alreadyBlocked = true
+break
+end
+end
+if not alreadyBlocked then
+table.insert(browserState.blockedIPs, ip)
+table.sort(browserState.blockedIPs)
+end
+renderIPBlockerHistory()
+local result = submitScenarioAction(("browser_ipblocker_block %s"):format(ip), { "ch4_block_source" })
+ipBlockerInputBox.Text = ""
+ipBlockerStatus.Text = alreadyBlocked and ("Source %s was already blocked."):format(ip) or (("Source %s blocked (sim)."):format(ip))
+if result and result.success then
+if ip == WANNAWAIL_ATTACKER_IP then
+if browserState._markWannaWailFlag then
+		browserState._markWannaWailFlag(WANNAWAIL_ATTR_SOURCE_BLOCKED, true)
+	end
+end
+setBrowserStatus(("RBXIPBlocker blocked %s. Mission step complete."):format(ip))
+else
+setBrowserStatus(("RBXIPBlocker blocked %s (sim)"):format(ip))
+end
 end)
 PacketApplyBtn.MouseButton1Click:Connect(function()
 local ip = tostring(PacketIPBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -2547,12 +4203,15 @@ PacketIPBox.Text = "192.168.32.12"
 end
 startPacketCaptureForIP(PacketIPBox.Text)
 if PacketDNSBox.Text == "" then
-PacketDNSBox.Text = "playerdata"
+PacketDNSBox.Text = "admin"
 end
 populatePacketRows()
 setBrowserStatus("Following simulated traffic stream.")
 end)
 UIS.InputBegan:Connect(function(input, gameProcessed)
+	if MainGUI and MainGUI.Enabled then
+		browserState._markInteraction()
+	end
 if gameProcessed then return end
 if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 if input.KeyCode == Enum.KeyCode.Up then
@@ -2591,6 +4250,9 @@ end
 end
 end)
 UrlBox.FocusLost:Connect(function(enterPressed)
+	if MainGUI and MainGUI.Enabled then
+		browserState._markInteraction()
+	end
 if enterPressed then
 navigateTo(UrlBox.Text)
 end
@@ -2610,6 +4272,9 @@ currentDraft = TermInput.Text
 end
 end)
 TermInput.FocusLost:Connect(function(enter)
+	if MainGUI and MainGUI.Enabled then
+		browserState._markInteraction()
+	end
 if enter then
 local c = TermInput.Text
 TermInput.Text = ""
@@ -2645,7 +4310,11 @@ TermFrame.Visible = false
 BrowserFrame.Visible = false
 MissionsFrame.Visible = true
 end)
-bSave.MouseButton1Click:Connect(saveNow)
+task.defer(function()
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+end)
 addLine(PROMPT)
 return gui
 end
@@ -2895,6 +4564,7 @@ Position = UDim2.new(0.5, -105, 1, -58),
 })
 round(startBtn, 12)
 startBtn.MouseButton1Click:Connect(function()
+	browserState._markInteraction()
 if not isToolEquipped() then
 gui.Enabled = false
 return
@@ -2906,7 +4576,10 @@ resetUI()
 MainGUI.Enabled = true
 started = true
 playAudio()
-if TermInput then TermInput:CaptureFocus() end
+if browserState._ensureChapter3MailVisible then
+browserState._ensureChapter3MailVisible()
+end
+if TermInput and not (BrowserFrame and BrowserFrame.Visible) then TermInput:CaptureFocus() end
 else
 stopAudio()
 end
@@ -3251,26 +4924,27 @@ function renderObjectiveCards(objectivesList)
 	end)
 end
 
-local clockLoopStarted = false
-local objectiveUpdatesBound = false
+do
+browserState._clockLoopStarted = false
+browserState._objectiveUpdatesBound = false
 
-local function updateClockLabel()
+browserState._updateClockLabel = function()
 	if ClockLabel and ClockLabel.Parent then
 		ClockLabel.Text = os.date("%H:%M:%S")
 	end
 end
 
-local function refreshMissionPanels()
+browserState._refreshMissionPanels = function()
 	renderMissionCards(ObjectiveManager.Get())
 	renderObjectiveCards(ObjectiveManager.Get("ChapterObjectives"))
 end
 
-local function bindObjectiveUpdates()
-	if objectiveUpdatesBound then
+browserState._bindObjectiveUpdates = function()
+	if browserState._objectiveUpdatesBound then
 		return
 	end
 
-	objectiveUpdatesBound = true
+	browserState._objectiveUpdatesBound = true
 	ObjectiveManager.Changed:Connect(function(objectivesList, category)
 		if category == "ChapterObjectives" then
 			renderObjectiveCards(objectivesList)
@@ -3283,122 +4957,230 @@ local function bindObjectiveUpdates()
 	end)
 end
 
-local function ensureClockLoop()
-	updateClockLabel()
-	if clockLoopStarted then
+browserState._ensureClockLoop = function()
+	browserState._updateClockLabel()
+	if browserState._clockLoopStarted then
 		return
 	end
 
-	clockLoopStarted = true
+	browserState._clockLoopStarted = true
 	task.spawn(function()
 		while true do
 			task.wait(1)
-			updateClockLabel()
+			if not ClockLabel or not ClockLabel.Parent then
+				browserState._clockLoopStarted = false
+				break
+			end
+			browserState._updateClockLabel()
 		end
 	end)
 end
 
-local function onEquipped()
+browserState._onEquipped = function()
+	if not isToolEquipped() then
+		setEquipped(false)
+		lastEquipped = false
+		return
+	end
 	setEquipped(true)
+	lastEquipped = true
+	browserState._markInteraction()
+	if HintGUI and HintGUI.Parent ~= PlayerGui then
+		HintGUI = nil
+	end
+	if MainGUI and MainGUI.Parent ~= PlayerGui then
+		MainGUI = nil
+	end
+	local existingHint = PlayerGui:FindFirstChild("TabletHint")
+	if existingHint and existingHint ~= HintGUI then
+		existingHint:Destroy()
+	end
+	local existingMain = PlayerGui:FindFirstChild("TabletGUI")
+	if existingMain and existingMain ~= MainGUI then
+		existingMain:Destroy()
+	end
+	if ReplayPromptGUI then
+		ReplayPromptGUI.Enabled = false
+	end
+	if not HintGUI then
+		HintGUI = buildHint()
+	end
 	if not MainGUI then
 		MainGUI = buildMainUI()
 	end
-	bindObjectiveUpdates()
-	ensureClockLoop()
-	refreshMissionPanels()
+	browserState._bindObjectiveUpdates()
+	browserState._ensureClockLoop()
+	browserState._refreshMissionPanels()
 	if not started then
-		if not HintGUI then
-			HintGUI = buildHint()
-		end
 		HintGUI.Enabled = true
 		MainGUI.Enabled = false
 	else
-		if HintGUI then HintGUI.Enabled = false end
+		HintGUI.Enabled = false
 		MainGUI.Enabled = true
 		playAudio()
+		if browserState._ensureChapter3MailVisible then
+			browserState._ensureChapter3MailVisible()
+		end
 	end
 	bindEGuard()
 end
-local function onUnequipped()
+
+browserState._onUnequipped = function()
+	if not isEquipped and not HintGUI and not MainGUI and not ReplayPromptGUI then
+		lastEquipped = false
+		return
+	end
 	setEquipped(false)
+	lastEquipped = false
 	started = false
-	if HintGUI then HintGUI.Enabled = false end
-	if MainGUI then MainGUI.Enabled = false end
+	if ReplayPromptGUI then
+		ReplayPromptGUI.Enabled = false
+		ReplayPromptGUI:Destroy()
+		ReplayPromptGUI = nil
+	end
+	if HintGUI then 
+		HintGUI.Enabled = false
+		HintGUI:Destroy()
+		HintGUI = nil
+	end
+	if MainGUI then 
+		MainGUI.Enabled = false
+		MainGUI:Destroy()
+		MainGUI = nil
+	end
 	stopAudio()
 	teardownStart()
 	bindEGuard()
+	task.defer(function()
+		saveNow({ silent = true, force = true })
+	end)
 end
-local function hookTool(t)
-if Tool == t then return end
-Tool = t
-t.AncestryChanged:Connect(function(_, parent)
-if not parent and Tool == t then
-onUnequipped()
-Tool = nil
+
+browserState._hookTool = function(t)
+	if Tool == t then return end
+	Tool = t
+	t.AncestryChanged:Connect(function(_, parent)
+		if not parent and Tool == t then
+			browserState._onUnequipped()
+			Tool = nil
+		end
+	end)
+	t:GetPropertyChangedSignal("Parent"):Connect(function()
+		if Tool ~= t then
+			return
+		end
+		local char = Player.Character
+		if char and t.Parent == char then
+			browserState._onEquipped()
+		elseif isEquipped or HintGUI or MainGUI or ReplayPromptGUI then
+			browserState._onUnequipped()
+		end
+	end)
+	t.Equipped:Connect(browserState._onEquipped)
+	t.Unequipped:Connect(browserState._onUnequipped)
+	local char = Player.Character
+	if char and t.Parent == char then
+		browserState._onEquipped()
+	end
 end
-end)
-t.Equipped:Connect(onEquipped)
-t.Unequipped:Connect(onUnequipped)
-local char = Player.Character
-if char and t.Parent == char then
-onEquipped()
+
+browserState._findTool = function()
+	local char = Player.Character
+	local backpack = Player:FindFirstChildOfClass("Backpack")
+	if char then
+		local t = char:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	if backpack then
+		local t = backpack:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	return nil
 end
+
+browserState._watchContainer = function(container)
+	if not container then
+		return
+	end
+	container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == TOOL_NAME then
+			browserState._hookTool(child)
+		end
+	end)
+	local toolInContainer = container:FindFirstChild(TOOL_NAME)
+	if toolInContainer and toolInContainer:IsA("Tool") then
+		browserState._hookTool(toolInContainer)
+	end
 end
-local function findTool()
-local char = Player.Character
-local backpack = Player:FindFirstChildOfClass("Backpack")
-if char then
-local t = char:FindFirstChild(TOOL_NAME)
-if t and t:IsA("Tool") then return t end
+
+browserState._watchContainer(Player:WaitForChild("Backpack"))
+browserState._watchContainer(Player.Character or Player.CharacterAdded:Wait())
+Tool = Tool or browserState._findTool()
+if Tool then
+	browserState._hookTool(Tool)
 end
-if backpack then
-local t = backpack:FindFirstChild(TOOL_NAME)
-if t and t:IsA("Tool") then return t end
-end
-return nil
-end
-local function scanForToolNow()
-local t = findTool()
-if t then hookTool(t) end
-end
-local function watch(container)
-if not container then return end
-container.ChildAdded:Connect(function(child)
-if child:IsA("Tool") and child.Name == TOOL_NAME then
-hookTool(child)
-end
-end)
-local existing = container:FindFirstChild(TOOL_NAME)
-if existing and existing:IsA("Tool") then
-hookTool(existing)
-end
-end
-watch(Player:WaitForChild("Backpack"))
-watch(Player.Character or Player.CharacterAdded:Wait())
-scanForToolNow()
+lastEquipped = isToolEquipped()
 Player.CharacterAdded:Connect(function(char)
-started = false
-stopAudio()
-teardownStart()
-bindEGuard()
-watch(char)
-task.defer(scanForToolNow)
+	started = false
+	stopAudio()
+	teardownStart()
+	bindEGuard()
+	browserState._watchContainer(char)
+	task.defer(function()
+		Tool = nil
+		lastEquipped = false
+		task.wait(0.1)
+		Tool = browserState._findTool()
+		if Tool then
+			browserState._hookTool(Tool)
+			if isToolEquipped() then
+				browserState._onEquipped()
+			end
+		end
+	end)
 end)
 RunService.Heartbeat:Connect(function()
-if not Tool then
-scanForToolNow()
-return
-end
-local equippedNow = isToolEquipped()
-if equippedNow ~= lastEquipped then
-lastEquipped = equippedNow
-if equippedNow then
-onEquipped()
-else
-onUnequipped()
-end
-end
+	local now = os.clock()
+	if not Tool then
+		Tool = browserState._findTool() or Tool
+		if Tool then
+			browserState._hookTool(Tool)
+		end
+		return
+	end
+	if browserState._ensureChapter3MailVisible then
+		browserState._ensureChapter3MailVisible()
+	end
+	if browserState.adminTab == "logs" and BrowserFrame and BrowserFrame.Visible and AdminDashboardPage and AdminDashboardPage.Visible then
+		if now - (browserState.logsLastRender or 0) >= 1 then
+			browserState.logsLastRender = now
+			renderAdminLogs()
+		end
+	end
+	if autoSaveQueuedAt > 0 and not autoSaveInFlight and now - autoSaveQueuedAt >= AUTO_SAVE_DELAY then
+		saveNow({ silent = true })
+	elseif MainGUI and MainGUI.Enabled and not autoSaveInFlight then
+		if now - (browserState.lastInteractionAt or 0) >= 30 and not browserState.idleAutoSaveNotified then
+			if saveNow({ silent = true, force = true }) then
+				browserState.idleAutoSaveNotified = true
+				notify({ Title = "HackTablet", Text = "Autosaved after 30 seconds of inactivity.", Duration = 3 })
+			end
+		elseif now - autoSaveLastRunAt >= AUTO_SAVE_INTERVAL then
+			queueAutoSave(false)
+		end
+	end
+	local equippedNow = isToolEquipped()
+	if equippedNow ~= lastEquipped then
+		lastEquipped = equippedNow
+		if equippedNow then
+			browserState._onEquipped()
+		else
+			browserState._onUnequipped()
+		end
+	end
 end)
+end
+
 if MainGUI then
 MainGUI:GetPropertyChangedSignal("Enabled"):Connect(bindEGuard)
 end
