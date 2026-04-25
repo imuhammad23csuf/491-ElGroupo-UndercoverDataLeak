@@ -446,16 +446,16 @@ local function updateChaseState(now)
         return
     end
 
-    if now - stateStartTime > CHASE_TIMEOUT then
-        startReturn()
-        return
-    end
-
     if not canSeePlayer(targetHRP) then
         lastSeenPos = lastSeenPos or targetHRP.Position
         startSearch()
         return
     end
+
+    -- Player is visible: refresh the chase timer so the guard keeps pursuing
+    -- as long as it can see the player. The timeout only acts as a safety
+    -- valve for edge cases where sight is maintained for an unusually long time.
+    stateStartTime = now
 
     lastSeenPos = targetHRP.Position
     HUMANOID.WalkSpeed = CHASE_SPEED
