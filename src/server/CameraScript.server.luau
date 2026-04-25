@@ -10,6 +10,14 @@ local PUSH_INTERVAL = 0.5
 local SUSPICION_TICK_RATE = 0.25
 local SUSPICION_PER_TICK = 2
 
+-- Shared with CameraJammer.server.luau — must match exactly.
+local JAM_STATE_ATTRIBUTE = "CameraNetworkJamUntil"
+
+local function isJamActive()
+	local jamUntil = ReplicatedStorage:GetAttribute(JAM_STATE_ATTRIBUTE)
+	return typeof(jamUntil) == "number" and jamUntil > Workspace:GetServerTimeNow()
+end
+
 local DEFAULT_SWEEP_ANGLE = 60
 local DEFAULT_SWEEP_SPEED = 35
 local DEFAULT_TRACK_SPEED = 140
@@ -397,6 +405,18 @@ while true do
 	local now = os.clock()
 	local dt = math.max(now - lastTime, 0)
 	lastTime = now
+
+	-- When the camera network is jammed, freeze all cameras in place:
+	-- clear any tracked targets and skip suspicion ticks entirely.
+	if isJamActive() then
+		for _, state in ipairs(cameraStates) do
+			if state.targetPlayer then
+				state.targetPlayer = nil
+				updateIndicator(state, nil)
+			end
+		end
+		continue
+	end
 
 	for _, state in ipairs(cameraStates) do
 		if not updateTracking(state, now, dt) then

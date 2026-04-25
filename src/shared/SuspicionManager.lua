@@ -310,4 +310,17 @@ else
 	end)
 end
 
-return SuspicionManager
+-- Security: return only the read-only API to client contexts.
+-- Mutation functions (Set, Add, Reduce, AddSuspicion, ReduceSuspicion, addSuspicion)
+-- are intentionally excluded from the client-facing table so that no client-side
+-- code path can alter suspicion values, even if the module is required from
+-- ReplicatedStorage by a malicious script.
+if RunService:IsServer() then
+	return SuspicionManager
+else
+	return {
+		Changed = SuspicionManager.Changed,
+		Get = SuspicionManager.Get,
+		GetSuspicion = SuspicionManager.GetSuspicion,
+	}
+end
