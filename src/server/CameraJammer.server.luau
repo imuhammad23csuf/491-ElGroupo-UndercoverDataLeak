@@ -6,11 +6,18 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
+local Players = game:GetService("Players")
+
 local JAM_DURATION = 60
 local JAM_STATE_ATTRIBUTE = "CameraNetworkJamUntil"
 local COOLDOWN = 10
 
-local lastJamTime = -math.huge
+-- Per-player cooldown tracked with os.clock() (server-only timing, no network dependency)
+local playerCooldowns = {}
+
+Players.PlayerRemoving:Connect(function(player)
+    playerCooldowns[player.UserId] = nil
+end)
 
 local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotesFolder then
@@ -26,28 +33,44 @@ if not JamRemote then
     JamRemote.Parent = remotesFolder
 end
 
-JamRemote.OnServerInvoke = function(_player, _target)
-    local now = Workspace:GetServerTimeNow()
+JamRemote.OnServerInvoke = function(player, _target)
+    -- Validate player is alive and in game
+    if not player or not player.Parent then
+        return { success = false, message = "Invalid request." }
+    end
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then
+        return { success = false, message = "Camera jammer unavailable." }
+    end
+
+    -- Workspace:GetServerTimeNow() is used here because the client reads this
+    -- attribute and compares it against its own Workspace:GetServerTimeNow() call,
+    -- so both sides must use the same synchronized clock.
+    local serverNow = Workspace:GetServerTimeNow()
 
     local currentJamUntil = ReplicatedStorage:GetAttribute(JAM_STATE_ATTRIBUTE)
-    if typeof(currentJamUntil) == "number" and currentJamUntil > now then
-        local remaining = math.ceil(currentJamUntil - now)
+    if typeof(currentJamUntil) == "number" and currentJamUntil > serverNow then
+        local remaining = math.ceil(currentJamUntil - serverNow)
         return {
             success = false,
             message = string.format("Camera network already jammed. Clears in %d second%s.", remaining, remaining == 1 and "" or "s"),
         }
     end
 
-    if now - lastJamTime < COOLDOWN then
-        local wait = math.ceil(COOLDOWN - (now - lastJamTime))
+    -- Per-player cooldown uses os.clock() (immediate, no network dependency)
+    local clockNow = os.clock()
+    local lastUsed = playerCooldowns[player.UserId] or -math.huge
+    if clockNow - lastUsed < COOLDOWN then
+        local wait = math.ceil(COOLDOWN - (clockNow - lastUsed))
         return {
             success = false,
             message = string.format("Camera jammer on cooldown. Ready in %d second%s.", wait, wait == 1 and "" or "s"),
         }
     end
 
-    lastJamTime = now
-    ReplicatedStorage:SetAttribute(JAM_STATE_ATTRIBUTE, now + JAM_DURATION)
+    playerCooldowns[player.UserId] = clockNow
+    ReplicatedStorage:SetAttribute(JAM_STATE_ATTRIBUTE, serverNow + JAM_DURATION)
 
     return {
         success = true,
