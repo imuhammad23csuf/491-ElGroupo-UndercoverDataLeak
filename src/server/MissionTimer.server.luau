@@ -202,6 +202,9 @@ local function endMission(player, outcome: string): number?
 
 	-- Only save/compare best time on successful mission completion.
 	if outcome == "escaped" or outcome == "completed" then
+
+	-- Only save/compare best time on successful escape
+	if outcome == "escaped" then
 		local previous = loadBestTime(player)
 		local newBest = saveBestTime(player, elapsed)
 		if newBest and (previous == nil or newBest < previous) then
@@ -209,6 +212,9 @@ local function endMission(player, outcome: string): number?
 			print(("[MissionTimer] NEW BEST for %s: %.2fs (was %s)"):format(
 				player.Name, newBest, previous and ("%.2fs"):format(previous) or "none"))
 		end
+	end
+
+	if outcome == "escaped" then
 		broadcastLeaderboard()
 	end
 

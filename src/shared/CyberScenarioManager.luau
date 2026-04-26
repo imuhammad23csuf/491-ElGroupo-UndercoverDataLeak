@@ -1,5 +1,3 @@
-<<<<<<< Updated upstream
-=======
 --[[
     CyberScenarioManager.luau  (ModuleScript — server-side)
     ─────────────────────────────────────────────────────────────────
@@ -372,6 +370,7 @@ local function countResolvedEntries(resolvedMap)
     for _, resolved in pairs(resolvedMap or {}) do
         if resolved then
             count = count + 1
+            count += 1
         end
     end
 
@@ -845,4 +844,4 @@ function CyberScenarioManager.GetSessionInfo(player)
 end
 
 return CyberScenarioManager
->>>>>>> Stashed changes
+

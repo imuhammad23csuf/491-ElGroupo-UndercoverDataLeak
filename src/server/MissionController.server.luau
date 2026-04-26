@@ -41,12 +41,26 @@ local function syncPlayerObjectives(player)
 end
 
 Players.PlayerAdded:Connect(function(player)
-	playerMissions[player] = cloneMission()
+    playerMissions[player] = cloneMission()
+    task.delay(2, function()
+        syncPlayerObjectives(player)
+        -- Timer does NOT start here anymore
+    end)
+end)
 
 	task.delay(2, function()
 		syncPlayerObjectives(player)
+local StartNewsCutscene = ReplicatedStorage:WaitForChild("StartNewsCutscene", 10)
+if StartNewsCutscene then
+	StartNewsCutscene.OnServerEvent:Connect(function(player)
+		-- Eligibility check: player must exist, have a mission, and not already be in one
+		if not player or not player.Parent then return end
+		if not playerMissions[player] then return end
+		if _G.MissionTimer then
+			_G.MissionTimer.startMission(player)
+		end
 	end)
-end)
+end
 
 for _, player in ipairs(Players:GetPlayers()) do
 	playerMissions[player] = cloneMission()
