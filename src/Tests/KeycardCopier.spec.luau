@@ -1,4 +1,4 @@
-local KeycardCopier = require(game.ServerScriptService.server.KeycardCopier)
+local KeycardCopier = require(game.ServerScriptService.Server.KeycardCopier)
 
 local function makeFakePlayer(userId)
 	return {

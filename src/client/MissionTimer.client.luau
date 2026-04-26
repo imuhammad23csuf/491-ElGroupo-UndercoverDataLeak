@@ -1,261 +1,141 @@
--- MissionTimer.server.luau
--- Tracks mission completion times, saves best times to DataStore,
--- and exposes RemoteEvents for client HUD and leaderboard updates.
+-- MissionTimer.client.luau
+-- Original lightweight HUD for the server-authored mission timer.
 
 local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
 
-local BestTimesStore = DataStoreService:GetDataStore("MissionBestTimes_FullRun_v2")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
-local Remotes = ReplicatedStorage:FindFirstChild("MissionTimerRemotes")
-if not Remotes then
-	Remotes = Instance.new("Folder")
-	Remotes.Name = "MissionTimerRemotes"
-	Remotes.Parent = ReplicatedStorage
+local remotes = ReplicatedStorage:WaitForChild("MissionTimerRemotes", 15)
+if not remotes then
+	warn("[MissionTimer] MissionTimerRemotes not found.")
+	return
 end
 
-local function getOrMakeRemote(class, name)
-	local existing = Remotes:FindFirstChild(name)
-	if existing then
-		return existing
-	end
-	local obj = Instance.new(class)
-	obj.Name = name
-	obj.Parent = Remotes
-	return obj
+local EvStartTimer = remotes:WaitForChild("StartTimer")
+local EvStopTimer = remotes:WaitForChild("StopTimer")
+local EvNewBestTime = remotes:WaitForChild("NewBestTime")
+local FnGetTimerState = remotes:WaitForChild("GetTimerState")
+
+local running = false
+local startClock = 0
+local displayedElapsed = 0
+
+local function formatTime(seconds)
+	seconds = math.max(0, tonumber(seconds) or 0)
+	local minutes = math.floor(seconds / 60)
+	local wholeSeconds = math.floor(seconds % 60)
+	local centiseconds = math.floor((seconds % 1) * 100)
+	return ("%02d:%02d.%02d"):format(minutes, wholeSeconds, centiseconds)
 end
 
--- Server ? Client
-local EvStartTimer = getOrMakeRemote("RemoteEvent", "StartTimer")
-local EvStopTimer = getOrMakeRemote("RemoteEvent", "StopTimer")
-local EvNewBestTime = getOrMakeRemote("RemoteEvent", "NewBestTime")
--- Client ? Server (retained only as monitored request surfaces)
-local EvMissionStart = getOrMakeRemote("RemoteEvent", "MissionStart")
-local EvMissionEnd = getOrMakeRemote("RemoteEvent", "MissionEnd")
--- Server ? All clients
-local EvLeaderboard = getOrMakeRemote("RemoteEvent", "LeaderboardUpdate")
--- Server ? Client
-local FnGetBestTime = getOrMakeRemote("RemoteFunction", "GetMyBestTime")
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "MissionTimerGui"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
 
-local TOP_N = 10
-local MAX_BEST_TIME = 60 * 60 * 24
-local BEST_TIME_REQUEST_COOLDOWN = 0.25
-local MISSION_REMOTE_COOLDOWN = 1.0
+local frame = Instance.new("Frame")
+frame.Name = "TimerFrame"
+frame.AnchorPoint = Vector2.new(0.5, 0)
+frame.Position = UDim2.new(0.5, 0, 0, 18)
+frame.Size = UDim2.new(0, 220, 0, 46)
+frame.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+frame.BackgroundTransparency = 0.12
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
 
--- activeMissions[userId] = { startTick: number }
-local activeMissions = {}
-local bestTimeCache = {}
-local remoteCooldowns = {}
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = frame
 
-local function datastoreKey(player)
-	return "player_" .. player.UserId
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(20, 100, 200)
+stroke.Thickness = 1.5
+stroke.Transparency = 0.35
+stroke.Parent = frame
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Position = UDim2.new(0, 12, 0, 5)
+title.Size = UDim2.new(1, -24, 0, 14)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.Text = "MISSION TIMER"
+title.TextColor3 = Color3.fromRGB(180, 205, 255)
+title.TextSize = 11
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = frame
+
+local timeLabel = Instance.new("TextLabel")
+timeLabel.Name = "TimeLabel"
+timeLabel.Position = UDim2.new(0, 12, 0, 17)
+timeLabel.Size = UDim2.new(1, -24, 0, 24)
+timeLabel.BackgroundTransparency = 1
+timeLabel.Font = Enum.Font.GothamBlack
+timeLabel.Text = formatTime(0)
+timeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+timeLabel.TextSize = 22
+timeLabel.TextXAlignment = Enum.TextXAlignment.Left
+timeLabel.Parent = frame
+
+local function setElapsed(seconds)
+	displayedElapsed = math.max(0, tonumber(seconds) or 0)
+	timeLabel.Text = formatTime(displayedElapsed)
 end
 
-local function isFiniteNumber(value)
-	local n = tonumber(value)
-	if not n or n ~= n or n == math.huge or n == -math.huge then
-		return nil
-	end
-	return n
+local function startTimer(initialElapsed)
+	local elapsed = math.max(0, tonumber(initialElapsed) or 0)
+	running = true
+	startClock = os.clock() - elapsed
+	setElapsed(elapsed)
 end
 
-local function sanitizeElapsedTime(value)
-	local n = isFiniteNumber(value)
-	if not n or n < 0 or n > MAX_BEST_TIME then
-		return nil
+local function stopTimer(elapsed, outcome)
+	running = false
+
+	if outcome == "caught" or outcome == "reset" then
+		setElapsed(0)
+	else
+		setElapsed(elapsed)
 	end
-	return math.floor(n * 100 + 0.5) / 100
 end
 
-local function withinCooldown(player, remoteName, cooldownSeconds)
-	remoteCooldowns[player.UserId] = remoteCooldowns[player.UserId] or {}
-	local now = os.clock()
-	local last = remoteCooldowns[player.UserId][remoteName] or 0
-	if now - last < cooldownSeconds then
-		return false
-	end
-	remoteCooldowns[player.UserId][remoteName] = now
-	return true
-end
-
-local function loadBestTime(player)
-	local ok, result = pcall(function()
-		return BestTimesStore:GetAsync(datastoreKey(player))
-	end)
-	if ok then
-		local sanitized = sanitizeElapsedTime(result)
-		bestTimeCache[player.UserId] = sanitized
-		return sanitized
-	end
-	warn("[MissionTimer] Failed to load best time for", player.Name, result)
-	return bestTimeCache[player.UserId]
-end
-
-local function saveBestTime(player, elapsed)
-	local sanitizedElapsed = sanitizeElapsedTime(elapsed)
-	if not sanitizedElapsed then
-		return bestTimeCache[player.UserId]
-	end
-
-	local ok, result = pcall(function()
-		return BestTimesStore:UpdateAsync(datastoreKey(player), function(oldValue)
-			local currentBest = sanitizeElapsedTime(oldValue)
-			if currentBest and currentBest <= sanitizedElapsed then
-				return currentBest
-			end
-			return sanitizedElapsed
-		end)
-	end)
-
-	if not ok then
-		warn("[MissionTimer] Failed to save best time for", player.Name, result)
-		return bestTimeCache[player.UserId]
-	end
-
-	local sanitizedResult = sanitizeElapsedTime(result) or sanitizedElapsed
-	bestTimeCache[player.UserId] = sanitizedResult
-	return sanitizedResult
-end
-
-local function getCachedOrLoadedBestTime(player)
-	if bestTimeCache[player.UserId] ~= nil then
-		return bestTimeCache[player.UserId]
-	end
-	return loadBestTime(player)
-end
-
-local function buildLeaderboardData()
-	local rows = {}
-	for _, player in ipairs(Players:GetPlayers()) do
-		local best = getCachedOrLoadedBestTime(player)
-		if best then
-			table.insert(rows, { name = player.Name, time = best })
-		end
-	end
-	table.sort(rows, function(a, b)
-		return a.time < b.time
-	end)
-	local trimmed = {}
-	for i = 1, math.min(TOP_N, #rows) do
-		table.insert(trimmed, rows[i])
-	end
-	return trimmed
-end
-
-local function broadcastLeaderboard()
-	EvLeaderboard:FireAllClients(buildLeaderboardData())
-end
-
-local function startMission(player)
-	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		return
-	end
-
-	if activeMissions[player.UserId] then
-		warn("[MissionTimer] Mission already active for", player.Name)
-		return
-	end
-
-	activeMissions[player.UserId] = {
-		startTick = os.clock(),
-	}
-	EvStartTimer:FireClient(player)
-	print("[MissionTimer] Mission started for", player.Name)
-end
-
-local function endMission(player, outcome)
-	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		return nil
-	end
-
-	local mission = activeMissions[player.UserId]
-	if not mission then
-		warn("[MissionTimer] No active mission for", player.Name)
-		return nil
-	end
-
-	if outcome ~= "escaped" and outcome ~= "caught" and outcome ~= "completed" then
-		warn("[MissionTimer] Rejected invalid server outcome for", player.Name, outcome)
-		return nil
-	end
-
-	local elapsed = sanitizeElapsedTime(os.clock() - mission.startTick)
-	if not elapsed then
-		warn("[MissionTimer] Rejected invalid elapsed time for", player.Name)
-		activeMissions[player.UserId] = nil
-		return nil
-	end
-
-	activeMissions[player.UserId] = nil
-	EvStopTimer:FireClient(player, elapsed, outcome)
-
-	-- Only full Chapter 4 completions should reach the leaderboard.
-	if outcome == "completed" then
-		local previous = getCachedOrLoadedBestTime(player)
-		local newBest = saveBestTime(player, elapsed)
-		if newBest and (previous == nil or newBest < previous) then
-			EvNewBestTime:FireClient(player, newBest, previous)
-			print(("[MissionTimer] NEW BEST for %s: %.2fs (was %s)"):format(
-				player.Name,
-				newBest,
-				previous and ("%.2fs"):format(previous) or "none"
-			))
-		end
-		broadcastLeaderboard()
-	end
-
-	print(("[MissionTimer] Mission ended for %s | outcome=%s | time=%.2fs"):format(
-		player.Name,
-		outcome,
-		elapsed
-	))
-	return elapsed
-end
-
-_G.MissionTimer = {
-	startMission = startMission,
-	endMission = endMission,
-	completeMission = function(player)
-		return endMission(player, "completed")
-	end,
-}
-
-EvMissionStart.OnServerEvent:Connect(function(player)
-	if withinCooldown(player, "MissionStart", MISSION_REMOTE_COOLDOWN) then
-		-- Security fix: clients can request nothing here; mission starts are server-authored only.
-		warn("[MissionTimer] Ignored insecure client MissionStart request from", player.Name)
-	end
+EvStartTimer.OnClientEvent:Connect(function(initialElapsed)
+	startTimer(initialElapsed)
 end)
 
-EvMissionEnd.OnServerEvent:Connect(function(player, outcome)
-	if withinCooldown(player, "MissionEnd", MISSION_REMOTE_COOLDOWN) then
-		warn(("[MissionTimer] Ignored insecure client MissionEnd request from %s (%s)"):format(player.Name, tostring(outcome)))
-	end
+EvStopTimer.OnClientEvent:Connect(stopTimer)
+
+EvNewBestTime.OnClientEvent:Connect(function(newBest)
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = "Mission Timer",
+			Text = "New best time: " .. formatTime(newBest),
+			Duration = 4,
+		})
+	end)
 end)
 
-FnGetBestTime.OnServerInvoke = function(player)
-	if not withinCooldown(player, "GetMyBestTime", BEST_TIME_REQUEST_COOLDOWN) then
-		return bestTimeCache[player.UserId]
+RunService.RenderStepped:Connect(function()
+	if running then
+		setElapsed(os.clock() - startClock)
 	end
-	return getCachedOrLoadedBestTime(player)
-end
-
-Players.PlayerRemoving:Connect(function(player)
-	if activeMissions[player.UserId] then
-		activeMissions[player.UserId] = nil
-		print("[MissionTimer] Cleaned up abandoned mission for", player.Name)
-	end
-	bestTimeCache[player.UserId] = nil
-	remoteCooldowns[player.UserId] = nil
 end)
 
 task.spawn(function()
-	while true do
-		task.wait(60)
-		broadcastLeaderboard()
+	local ok, state = pcall(function()
+		return FnGetTimerState:InvokeServer()
+	end)
+
+	if ok and type(state) == "table" then
+		if state.running then
+			startTimer(state.elapsed)
+		else
+			stopTimer(state.elapsed, "reset")
+		end
 	end
 end)
-
-print("[MissionTimer] Server module loaded.")
-

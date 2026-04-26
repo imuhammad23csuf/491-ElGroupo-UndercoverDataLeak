@@ -145,7 +145,7 @@ local function nextCamera()
 		return
 	end
 
-	currentIndex += 1
+	currentIndex = currentIndex + 1
 	if currentIndex > #cameraPoints then
 		currentIndex = 1
 	end
@@ -158,7 +158,7 @@ local function previousCamera()
 		return
 	end
 
-	currentIndex -= 1
+	currentIndex = currentIndex - 1
 	if currentIndex < 1 then
 		currentIndex = #cameraPoints
 	end
@@ -254,6 +254,8 @@ jamOverlayLabel.TextScaled = true
 jamOverlayLabel.TextWrapped = true
 jamOverlayLabel.Font = Enum.Font.SourceSansBold
 jamOverlayLabel.Parent = jamOverlayFrame
+
+ReplicatedStorage:GetAttributeChangedSignal(JAM_STATE_ATTRIBUTE):Connect(updateJamUi)
 
 titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, -120, 0, 40)

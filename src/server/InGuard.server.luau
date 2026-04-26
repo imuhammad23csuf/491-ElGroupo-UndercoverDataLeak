@@ -18,6 +18,14 @@ local State = {
     RETURN = "RETURN",
 }
 
+local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or Instance.new("Folder")
+remotesFolder.Name = "Remotes"
+remotesFolder.Parent = ReplicatedStorage
+
+local GuardDialogueRemote = remotesFolder:FindFirstChild("GuardDialogue") or Instance.new("RemoteEvent")
+GuardDialogueRemote.Name = "GuardDialogue"
+GuardDialogueRemote.Parent = remotesFolder
+
 -- === INDOOR SETTINGS ===
 local HEARTBEAT_INTERVAL = 0.5
 local PATROL_SPEED = 8
@@ -37,6 +45,30 @@ local MOVE_TARGET_EPSILON = 2
 -- Suspicion tuning (Inside)
 local SUSPICION_PER_TICK = 2
 local SUSPICION_TICK_RATE = 0.25
+
+local CHASE_LINES = {
+    "Hey! Stop right there!",
+    "Unauthorized person in the building!",
+    "I saw you. Do not make this harder.",
+    "Security breach inside!",
+    "You are not supposed to be here.",
+}
+
+local SEARCH_LINES = {
+    "Where did you go?",
+    "I know I saw movement in here.",
+    "Checking the last known spot.",
+    "Come on out. This area is restricted.",
+    "Quiet rooms always make this worse.",
+}
+
+local GIVE_UP_LINES = {
+    "Lost them. Returning to patrol.",
+    "Area clear, I guess.",
+    "Must have been nothing.",
+    "I am calling that a false alarm.",
+    "Back to route. For now.",
+}
 
 -- === SUSPICION THROTTLE/BATCH ===
 local SUSPICION_PUSH_INTERVAL = 0.5
@@ -169,6 +201,18 @@ local function setState(nextState)
     clearMoveGoal()
 end
 
+local function showSpeechBubble(text)
+    GuardDialogueRemote:FireAllClients(RIG, text)
+end
+
+local function sayRandomLine(lines)
+    if not lines or #lines == 0 then
+        return
+    end
+
+    showSpeechBubble(lines[math.random(1, #lines)])
+end
+
 local function startPatrol(holdDuration)
     clearActiveTarget(true)
     lastSeenPos = nil
@@ -185,12 +229,14 @@ local function startChase(player, playerRoot)
     HUMANOID.WalkSpeed = CHASE_SPEED
     playWalk()
     setState(State.CHASE)
+    sayRandomLine(CHASE_LINES)
 end
 
 local function startSearch()
     clearActiveTarget(true)
     HUMANOID.WalkSpeed = CHASE_SPEED
     setState(State.SEARCH)
+    sayRandomLine(SEARCH_LINES)
 end
 
 local function getNearestPatrolIndex()
@@ -217,6 +263,7 @@ local function startReturn()
     HUMANOID.WalkSpeed = PATROL_SPEED
     playWalk()
     setState(State.RETURN)
+    sayRandomLine(GIVE_UP_LINES)
 end
 
 local function canSeePlayer(playerHRP)

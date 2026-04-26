@@ -52,9 +52,13 @@ local function attachTo(instance)
     end
 
     local clickDetector = instance:FindFirstChildWhichIsA("ClickDetector", true)
-    if clickDetector then
-        clickDetector.MouseClick:Connect(handleInspect)
+    if not clickDetector then
+        clickDetector = Instance.new("ClickDetector")
+        clickDetector.MaxActivationDistance = 12
+        clickDetector.Parent = part
     end
+
+    clickDetector.MouseClick:Connect(handleInspect)
 end
 
 for _, descendant in ipairs(Workspace:GetDescendants()) do

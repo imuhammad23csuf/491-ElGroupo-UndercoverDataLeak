@@ -390,7 +390,7 @@ addLine(("[%d] %s %s -> %s dns=%s port=%s server=%s"):format(
 i, r.protocol, r.src, r.dst, r.dns, r.port, r.server
 ))
 end
-addLine("Capture complete: targeted packets generated (sim)")
+addLine("Capture complete: targeted lab packets generated (sim)")
 terminalState.sniffCache = {
 host = host.label,
 ip = host.ip,
@@ -408,7 +408,7 @@ end
 startPacketCaptureForIP(target)
 addLine(("Packet Analyzer: %s (%s) (sim)"):format(host.label, host.ip))
 addLine(("Generated rows: %d"):format(#ActivePacketCapture.rows))
-addLine("Browser view: visit RBXPacketNet.com")
+addLine("Browser view: visit RBXPacketAnalyzer.com")
 end
 local function fakeConnect(target)
 target = target ~= "" and target or "192.168.43.20"
@@ -700,15 +700,15 @@ addLine("- no weak password policy found in simulation")
 end
 end
 local function showHelp()
-addLine("HackOS SIM commands:")
+addLine("HackOS authorized lab commands:")
 addLine("help - show this list")
 addLine("hint - show a clue for the current objective")
 addLine("apps - list apps")
 addLine("open <terminal|browser|notes> - switch screens")
-addLine("visit <url|home|tips|apps|mail> - open a page (sim)")
+addLine("visit <url|home|tips|apps|mail|rbxpacketanalyzer> - open a browser page")
 addLine("scan [nearby|ip] - scan nearby devices/host (sim)")
-addLine("sniff [ip] - capture fake packet traffic (sim)")
-addLine("packets [ip] - packet analyzer summary (sim)")
+addLine("sniff [ip] - capture simulated lab packet traffic")
+addLine("packets [ip] - packet analyzer terminal summary (browser: RBXPacketAnalyzer)")
 addLine("devices - list devices + MACs (terminal only)")
 addLine("mac <ip> - show MAC for device")
 addLine("connect <ip> - simulate network access (sim)")

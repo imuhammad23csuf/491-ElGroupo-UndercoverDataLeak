@@ -105,6 +105,18 @@ local function resetSuspicion(player)
 	SuspicionManager.Set(0, player)
 end
 
+local function getMissionTimer()
+	local deadline = os.clock() + 5
+	while os.clock() < deadline do
+		if _G.MissionTimer then
+			return _G.MissionTimer
+		end
+		task.wait(0.1)
+	end
+
+	return nil
+end
+
 local function handleCaught(player)
 	if not player or not player.Parent then
 		return
@@ -119,8 +131,9 @@ local function handleCaught(player)
 	showCaughtEvent:FireClient(player, true)
 	freezePlayer(player, true)
 	-- End mission timer with caught outcome
-	if _G.MissionTimer then
-		_G.MissionTimer.endMission(player, "caught")
+	local missionTimer = getMissionTimer()
+	if missionTimer then
+		missionTimer.endMission(player, "caught")
 	end
 
 	task.wait(2)
@@ -138,8 +151,9 @@ local function handleCaught(player)
 	showCaughtEvent:FireClient(player, false)
 
 	-- Being caught restarts the overall investigation timer from zero.
-	if _G.MissionTimer then
-		_G.MissionTimer.startMission(player)
+	missionTimer = getMissionTimer()
+	if missionTimer then
+		missionTimer.startMission(player)
 	end
 
 	handlingCaughtByUserId[player.UserId] = nil

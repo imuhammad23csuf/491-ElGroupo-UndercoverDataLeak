@@ -369,6 +369,7 @@ local function countResolvedEntries(resolvedMap)
 
     for _, resolved in pairs(resolvedMap or {}) do
         if resolved then
+            count = count + 1
             count += 1
         end
     end
@@ -677,6 +678,17 @@ function CyberScenarioManager.CheckSolution(player, input)
         return handleMailTriageStep(player, session, scenario, step, input)
     end
 
+    if step.id == "ch2_admin_login" and player:GetAttribute("RecoveredAdminCredentials") ~= true then
+        return {
+            success = false,
+            output = table.concat({
+                "[!] Admin login verification is locked until you inspect the sticky note credential hint.",
+                "[?] Hint: find and inspect the sticky note in the world first.",
+            }, "\n"),
+            feedback = "Inspect sticky note first.",
+        }
+    end
+
     -- ── Evaluate command ────────────────────────────────────────
     if not commandMatches(input, step) then
         local mistakePopup = buildMistakePopup(step)
@@ -832,3 +844,4 @@ function CyberScenarioManager.GetSessionInfo(player)
 end
 
 return CyberScenarioManager
+

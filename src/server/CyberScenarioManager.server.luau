@@ -11,12 +11,13 @@ local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
 local SuspicionManager = require(Shared:WaitForChild("SuspicionManager"))
 local KeycardCopier = require(ServerScriptService:WaitForChild("Server"):WaitForChild("KeycardCopier"))
 
-local MISTAKE_SUSPICION = 5
+local MISTAKE_SUSPICION = 2
 local PROGRESS_STORE = DataStoreService:GetDataStore("PlayerProgress_v1")
 local MAX_SUSPICION = 100
 local MAX_TIMES_LEAKED = 999
 local MAX_TEXT_INPUT_LENGTH = 256
 local MAX_SAVE_TIMESTAMP = 4102444800
+local MAX_TIMER_ELAPSED = 60 * 60 * 24
 local POSITION_COMPONENT_LIMIT = 100000
 local SAVE_ATTRIBUTE_KEYS = {
     "CurrentChapter",
@@ -158,6 +159,15 @@ local function sanitizeInteger(value, minimum, maximum, defaultValue)
     return n
 end
 
+local function sanitizeTimerElapsed(value)
+    local n = isFiniteNumber(value)
+    if not n or n < 0 then
+        return 0
+    end
+
+    return math.floor(math.min(n, MAX_TIMER_ELAPSED) * 100 + 0.5) / 100
+end
+
 local function sanitizeBoolean(value)
     return value == true
 end
@@ -265,7 +275,12 @@ local function applyPlayerAttributes(player, saved)
     saved = type(saved) == "table" and saved or {}
 
     for _, attributeName in ipairs(SAVE_ATTRIBUTE_KEYS) do
-        player:SetAttribute(attributeName, sanitizeAttributeValue(attributeName, saved[attributeName]))
+        local value = sanitizeAttributeValue(attributeName, saved[attributeName])
+        if attributeName == "Suspicion" then
+            SuspicionManager.Set(value, player)
+        else
+            player:SetAttribute(attributeName, value)
+        end
     end
 end
 
@@ -315,6 +330,7 @@ local function sanitizeSavedPayload(payload)
     return {
         version = sanitizeInteger(payload.version, 1, 10, 2),
         savedAt = sanitizeInteger(payload.savedAt, 0, MAX_SAVE_TIMESTAMP, 0),
+        timerElapsed = sanitizeTimerElapsed(payload.timerElapsed),
         attributes = type(payload.attributes) == "table" and payload.attributes or {},
         scenarioProgress = sanitizeScenarioProgressSnapshot(payload.scenarioProgress),
         position = sanitizeSavedPosition(payload.position),
@@ -398,6 +414,27 @@ local function resetRuntimeState(player)
     CyberScenarioManager.ResetProgress(player)
 end
 
+local function getMissionTimer()
+    local deadline = os.clock() + 5
+    while os.clock() < deadline do
+        if _G.MissionTimer then
+            return _G.MissionTimer
+        end
+        task.wait(0.1)
+    end
+
+    return nil
+end
+
+local function isRunActive(player)
+    local missionTimer = _G.MissionTimer
+    if missionTimer and missionTimer.isMissionActive and missionTimer.isMissionActive(player) then
+        return true
+    end
+
+    return CyberScenarioManager.GetSessionInfo(player) ~= nil
+end
+
 local function sanitizeSolutionInput(input)
     if type(input) ~= "string" then
         return nil
@@ -422,6 +459,13 @@ LoadScenarioRemote.OnServerInvoke = function(player, scenarioId)
     end
 
     local result, err = CyberScenarioManager.LoadScenario(player, safeScenarioId)
+    if type(result) == "table" then
+        local missionTimer = getMissionTimer()
+        if missionTimer and missionTimer.startMission then
+            missionTimer.startMission(player)
+        end
+    end
+
     local chapterNumber = extractChapterNumber(safeScenarioId)
     if chapterNumber then
         player:SetAttribute("CurrentChapter", chapterNumber)
@@ -450,13 +494,14 @@ CheckSolutionRemote.OnServerInvoke = function(player, input)
     local result = CyberScenarioManager.CheckSolution(player, safeInput)
 
     if type(result) == "table" and result.popupTitle and result.popupMessage then
-        local popupSent = LessonManager.TriggerCustomPopup(player, result.popupTitle, result.popupMessage, {
+        local notificationSent = LessonManager.TriggerNotification(player, result.popupTitle, result.popupMessage, {
             throttleKey = result.popupThrottleKey,
             throttleWindow = result.popupThrottleWindow,
+            duration = 3,
         })
 
-        if popupSent then
-            -- Security fix: suspicion now follows the same server-side popup throttle path.
+        if notificationSent then
+            -- Suspicion follows the same server-side notification throttle path.
             SuspicionManager.Add(MISTAKE_SUSPICION, player)
         end
     end
@@ -501,9 +546,16 @@ SaveProgressRemote.OnServerInvoke = function(player)
     end
 
     local trustedScenarioProgress = CyberScenarioManager.ExportProgress(player)
+    local missionTimer = getMissionTimer()
+    local timerElapsed = 0
+    if missionTimer and missionTimer.getElapsed then
+        timerElapsed = sanitizeTimerElapsed(missionTimer.getElapsed(player))
+    end
+
     local payload = {
         version = 2,
         savedAt = os.time(),
+        timerElapsed = timerElapsed,
         attributes = captureTrustedAttributes(player, trustedScenarioProgress),
         scenarioProgress = trustedScenarioProgress,
         position = capturePlayerPosition(player),
@@ -512,13 +564,23 @@ SaveProgressRemote.OnServerInvoke = function(player)
     local persistent, resultOrError = writeSavedProgress(player, payload)
     local hasSavedProgress = persistent == true or fallbackProgressCache[player.UserId] ~= nil
     player:SetAttribute("HasSavedProgress", hasSavedProgress)
-    local message = persistent and "Progress saved." or "Progress saved for this session only."
+    local message
+    if persistent then
+        message = "Progress saved."
+    else
+        message = "Progress saved for this session only."
+    end
+
+    local warning = nil
+    if not persistent then
+        warning = tostring(resultOrError)
+    end
 
     return {
         success = true,
         persistent = persistent,
         message = message,
-        warning = persistent and nil or tostring(resultOrError),
+        warning = warning,
     }
 end
 
@@ -527,6 +589,13 @@ LoadSavedProgressRemote.OnServerInvoke = function(player)
         return {
             success = false,
             message = "Please wait before loading again.",
+        }
+    end
+
+    if isRunActive(player) then
+        return {
+            success = false,
+            message = "Saved progress can only be loaded from the start menu.",
         }
     end
 
@@ -542,11 +611,18 @@ LoadSavedProgressRemote.OnServerInvoke = function(player)
     local sessionInfo = CyberScenarioManager.ImportProgress(player, payload.scenarioProgress)
     applyPlayerPosition(player, payload.position)
     player:SetAttribute("HasSavedProgress", true)
+    if sessionInfo then
+        local missionTimer = getMissionTimer()
+        if missionTimer and missionTimer.startMission then
+            missionTimer.startMission(player, payload.timerElapsed)
+        end
+    end
 
     return {
         success = true,
         message = "Saved progress loaded.",
         sessionInfo = sessionInfo,
+        timerElapsed = payload.timerElapsed,
         savedAt = payload.savedAt,
     }
 end
@@ -585,11 +661,23 @@ ClearSavedProgressRemote.OnServerInvoke = function(player)
     local persistent, err = clearSavedProgress(player)
     player:SetAttribute("HasSavedProgress", false)
 
+    local message
+    if persistent then
+        message = "Saved progress cleared."
+    else
+        message = "Saved progress cleared for this session only."
+    end
+
+    local warning = nil
+    if not persistent then
+        warning = tostring(err)
+    end
+
     return {
         success = true,
         persistent = persistent,
-        message = persistent and "Saved progress cleared." or "Saved progress cleared for this session only.",
-        warning = persistent and nil or tostring(err),
+        message = message,
+        warning = warning,
     }
 end
 
@@ -602,21 +690,50 @@ StartOverProgressRemote.OnServerInvoke = function(player)
         }
     end
 
+    if isRunActive(player) then
+        return {
+            success = false,
+            persistent = false,
+            message = "Start Over is disabled during an active mission.",
+        }
+    end
+
     local persistent, err = clearSavedProgress(player)
     resetRuntimeState(player)
     player:SetAttribute("HasSavedProgress", false)
 
+    local message
+    if persistent then
+        message = "Progress reset."
+    else
+        message = "Progress reset for this session."
+    end
+
+    local warning = nil
+    if not persistent then
+        warning = tostring(err)
+    end
+
     return {
         success = true,
         persistent = persistent,
-        message = persistent and "Progress reset." or "Progress reset for this session.",
-        warning = persistent and nil or tostring(err),
+        message = message,
+        warning = warning,
     }
 end
 
 CleanupRemote.OnServerEvent:Connect(function(player)
     if not withinCooldown(player, "Cleanup") then
         return
+    end
+
+    local missionTimer = getMissionTimer()
+    if missionTimer and missionTimer.isMissionActive and missionTimer.isMissionActive(player) then
+        if missionTimer.resetMission then
+            missionTimer.resetMission(player)
+        elseif missionTimer.endMission then
+            missionTimer.endMission(player, "reset")
+        end
     end
 
     CyberScenarioManager.Cleanup(player)

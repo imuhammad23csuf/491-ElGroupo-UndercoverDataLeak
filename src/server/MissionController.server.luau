@@ -48,6 +48,8 @@ Players.PlayerAdded:Connect(function(player)
     end)
 end)
 
+	task.delay(2, function()
+		syncPlayerObjectives(player)
 local StartNewsCutscene = ReplicatedStorage:WaitForChild("StartNewsCutscene", 10)
 if StartNewsCutscene then
 	StartNewsCutscene.OnServerEvent:Connect(function(player)

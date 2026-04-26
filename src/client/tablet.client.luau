@@ -274,7 +274,7 @@ local function requestGuardDistractFromTablet(options)
 	browserState._markInteraction()
 
 	local distractRemote = getRemote(DISTRACT_GUARD_REMOTE_NAME)
-	if not distractRemote or not distractRemote:IsA("RemoteEvent") then
+	if not distractRemote or not distractRemote:IsA("RemoteFunction") then
 		local message = "Guard distraction service unavailable."
 		if BrowserStatusLabel then
 			BrowserStatusLabel.Text = message
@@ -286,15 +286,14 @@ local function requestGuardDistractFromTablet(options)
 		return false
 	end
 
-	local ok = pcall(function()
-		distractRemote:FireServer()
+	local ok, result = pcall(function()
+		return distractRemote:InvokeServer()
 	end)
 
-	local message
-	if ok then
-		message = "Outside guard distracted for 15 seconds."
-	else
-		message = "Guard distraction request failed."
+	local success = ok and type(result) == "table" and result.success == true
+	local message = "Guard distraction request failed."
+	if ok and type(result) == "table" and type(result.message) == "string" and result.message ~= "" then
+		message = result.message
 	end
 
 	if BrowserStatusLabel then
@@ -307,7 +306,7 @@ local function requestGuardDistractFromTablet(options)
 		addLine(message)
 	end
 
-	return ok
+	return success
 end
 local function saveNow(options)
 options = options or {}
@@ -465,7 +464,7 @@ if low == "home" then return "hackos://home" end
 if low == "tips" then return "hackos://tips" end
 if low == "apps" then return "hackos://apps" end
 if low == "mail" or low == "bloxmail" then return "mail.bloxplay.com" end
-if low == "packetanalyzer" or low == "rbxpacketnet" then return "rbxpacketnet.com" end
+if low == "packetanalyzer" or low == "rbxpacketanalyzer" or low == "rbxpacketnet" then return "rbxpacketanalyzer.com" end
 if low == "ipblocker" or low == "rbxipblocker" then return "rbxipblocker.com" end
 if low:sub(1, 8) == "hackos://" then
 return low
@@ -1216,7 +1215,7 @@ if PacketPage then
 PacketPage.Visible = true
 end
 populatePacketRows()
-setBrowserStatus(("Loaded %s packet analyzer (sim)"):format(url))
+setBrowserStatus(("Loaded %s packet analyzer (authorized sim)"):format(url))
 end
 local function navigateTo(url)
 local uNorm = normalizeUrl(url)
@@ -1249,12 +1248,12 @@ setBrowserStatus("BloxMail opened. Mission step complete.")
 end
 return
 end
-if uNorm == "rbxpacketnet.com" or uNorm == "www.rbxpacketnet.com" then
-local result = submitScenarioAction and submitScenarioAction("browser_visit rbxpacketnet.com", { "ch1_packetnet" })
+if uNorm == "rbxpacketanalyzer.com" or uNorm == "www.rbxpacketanalyzer.com" or uNorm == "rbxpacketnet.com" or uNorm == "www.rbxpacketnet.com" then
+local result = submitScenarioAction and submitScenarioAction("browser_visit rbxpacketanalyzer.com", { "ch1_packets" })
 showPacketPage(uNorm)
 queueAutoSave(false)
 if result and result.success then
-setBrowserStatus("RBXPacketNet opened. Mission step complete.")
+setBrowserStatus("RBXPacketAnalyzer opened. Mission step complete.")
 end
 return
 end
@@ -2164,7 +2163,8 @@ else
 setBrowserStatus(("Message %s."):format(actionLabel))
 end
 elseif result and type(result.output) == "string" and result.output ~= "" then
-setBrowserStatus(result.output:gsub('%s+', ' '))
+local compactOutput = result.output:gsub('%s+', ' ')
+setBrowserStatus(compactOutput)
 else
 setBrowserStatus("Could not reach the mail classification service. Try again.")
 end
@@ -2248,7 +2248,7 @@ simOps.showHelp()
 elseif cmd == "hint" then
 showScenarioHint()
 elseif cmd == "apps" then
-addLine("Apps (SIM): terminal, browser, BloxMail, RBXPacketNet, admin portal, RBXIPBlocker")
+addLine("Apps (SIM): terminal, browser, BloxMail, RBXPacketAnalyzer, admin portal, RBXIPBlocker")
 addLine("Tip: open browser")
 elseif cmd == "open" then
 local which = (args[2] or ""):lower()
@@ -2345,7 +2345,7 @@ return
 else
 addLine("I do not know that command. Type: help")
 end
-if cmd ~= "hint" and cmd ~= "jamcam" and cmd ~= "jamcamera" then
+if cmd ~= "hint" and cmd ~= "jamcam" and cmd ~= "jamcamera" and cmd ~= "visit" and cmd ~= "packets" then
 syncScenarioProgress(raw)
 end
 addLine(PROMPT)

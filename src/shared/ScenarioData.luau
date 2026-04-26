@@ -11,14 +11,16 @@ local ScenarioData = {}
 ScenarioData.Chapter1_Recon = {
     type      = "terminal",
     title     = "Chapter 1: Active Reconnaissance",
-    objective = "Scan nearby networks, capture packets, and gain access to the Bloxplay network.",
+    objective = "Run an authorized simulated recon workflow: discover lab hosts, capture realistic packet telemetry, and identify the admin network path.",
     welcomeMessage = [[
 ╔══════════════════════════════════════════════════╗
 ║     HACKTABLET v2.4  —  RECONNAISSANCE MODE     ║
 ║  Objective: Scan networks & capture packets      ║
 ╚══════════════════════════════════════════════════╝
-You are outside Bloxplay HQ. Several WiFi networks
-are visible from your position.
+AUTHORIZED LAB SIMULATION.
+You are outside Bloxplay HQ in a fictional training environment.
+The tablet shows realistic host, packet, and browser data, but nothing
+touches a real network.
 Type  help  to see available commands.
 ]],
     steps = {
@@ -28,13 +30,13 @@ Type  help  to see available commands.
             hint        = "Start by checking what tools the tablet already exposes.",
             validCommands = { "help" },
             output      = [[
-[*] HackOS SIM commands loaded.
+[*] HackOS authorized lab commands loaded.
     Key commands for this mission:
-      scan [nearby|ip]   — discover devices
-      sniff [ip]         — capture packet traffic
-      packets [ip]       — open packet analyzer
-      connect <ip>       — simulate network access
-      ssh <user@ip>      — simulate SSH login
+      scan [nearby|ip]   - discover simulated lab devices
+      sniff [ip]         - generate a synthetic packet capture
+      visit <url>        - open browser tools such as rbxpacketanalyzer.com
+      connect <ip>       - simulate access to an authorized lab network
+      ssh <user@ip>      - simulate SSH login
 ]],
         },
         {
@@ -43,42 +45,48 @@ Type  help  to see available commands.
             hint        = "Begin with a reconnaissance command aimed at nearby targets.",
             validCommands = { "scan nearby", "scan" },
             output      = [[
-[*] Scan target: nearby (sim)
+[*] Scan target: nearby authorized lab range (sim)
     Bloxplay_ITWifi    [192.168.32.10]  open:53,67,68,80,443  role:Wireless gateway
     Bloxplay_AdminWifi [192.168.43.2]   open:22,80,443,8080   role:Admin wireless gateway
     Laptop             [192.168.32.12]  open:53,80,443,5151   role:Employee workstation
     PlayerData_Vault   [192.168.43.20]  open:22,80,443,3306   role:Player profile storage
     ...and more
-[*] Hint: inspect traffic from the employee workstation next
+[*] Hint: capture telemetry from the employee workstation next
 ]],
         },
         {
             id          = "ch1_sniff",
-            instruction = "Capture packets from the employee laptop using the sniff tool.",
-            hint        = "Follow traffic from the employee workstation, not the gateway.",
+            instruction = "Generate a packet capture from the employee laptop. Type: sniff 192.168.32.12",
+            hint        = "Capture telemetry from the employee workstation, not the gateway.",
             validCommands = { "sniff 192.168.32.12" },
             output      = [[
-[*] Sniffing Laptop (192.168.32.12) ... (sim)
+[*] Sniffing Laptop (192.168.32.12) on authorized lab interface wlan0 ... (sim)
 [1] HTTP  192.168.32.12 -> 192.168.43.20  dns=playerdata.bloxplay.local  port=80
 [2] TCP   192.168.32.12 -> 192.168.43.20  dns=auth.bloxplay.local        port=443
 [3] HTTP  192.168.43.20 -> 203.44.18.77   dns=bloxplay.com               port=80
 [4] DNS   192.168.32.10 -> 224.0.0.251    dns=admin.bloxplay.local       port=53
 [5] HTTPS 192.168.32.12 -> 192.168.43.20  dns=playerdata.bloxplay.local  port=443
-[*] Capture complete.
-[*] Suspicious outbound traffic to 203.44.18.77 detected.
-[*] Credentials observed in HTTP traffic: bloxplay-admin / blox123
+[*] Synthetic capture buffered to RBXPacketAnalyzer.
+[*] Suspicious outbound traffic to 203.44.18.77 detected in lab data.
+[*] Training credential observed in HTTP traffic: bloxplay-admin / blox123
 ]],
         },
         {
             id          = "ch1_packets",
-            instruction = "Inspect the packet analyzer for the same workstation.",
-            hint        = "Open the packet tool against the same workstation you just investigated.",
-            validCommands = { "packets 192.168.32.12" },
+            instruction = "Open the Browser and visit rbxpacketanalyzer.com to inspect the captured packets.",
+            hint        = "Use the browser packet analyzer, not the terminal summary. Try the PacketAnalyzer quick link or visit rbxpacketanalyzer.com.",
+            validCommands = {
+                "browser_visit rbxpacketanalyzer.com",
+                "browser_visit www.rbxpacketanalyzer.com",
+                "browser_visit rbxpacketnet.com",
+                "browser_visit www.rbxpacketnet.com",
+                "browser_capture 192.168.32.12",
+            },
             output      = [[
-[*] Packet Analyzer: Laptop (192.168.32.12) (sim)
-[*] Generated rows: 12
-[*] Notable: playerdata.bloxplay.local traffic found
-[*] Browser view available: visit RBXPacketNet.com
+[*] RBXPacketAnalyzer opened in the browser (authorized simulation).
+[*] Capture source: Laptop (192.168.32.12)
+[*] Notable stream: playerdata.bloxplay.local over HTTP
+[*] Analyst note: cleartext training credential and suspicious external callback confirmed.
 ]],
         },
         {
@@ -87,9 +95,9 @@ Type  help  to see available commands.
             hint        = "Pivot from reconnaissance into the admin-side gateway.",
             validCommands = { "connect 192.168.43.2" },
             output      = [[
-[*] Resolving 192.168.43.2 ... (sim)
-[*] Connected to Bloxplay_AdminWifi [192.168.43.2] (sim)
-[*] You now have access to the admin network segment.
+[*] Resolving 192.168.43.2 in the authorized lab ... (sim)
+[*] Connected to Bloxplay_AdminWifi [192.168.43.2] through the simulation.
+[*] You now have simulated access to the admin network segment.
 [*] Next: SSH into the player data vault.
 ]],
             isLastStep  = true,
@@ -103,7 +111,7 @@ Type  help  to see available commands.
 ScenarioData.Chapter2_SSH = {
     type      = "terminal",
     title     = "Chapter 2: SSH and Log Analysis",
-    objective = "Access the PlayerData_Vault server and find evidence of the attacker.",
+        objective = "Access the PlayerData_Vault server, verify admin access from a recovered sticky-note credential, and find evidence of the attacker.",
     welcomeMessage = [[
 ╔══════════════════════════════════════════════════╗
 ║      HACKTABLET v2.4  —  FORENSICS MODE         ║
@@ -180,6 +188,41 @@ Server report (SIM)
 - investigate running processes
 - review netstat output
 [*] Attacker IP confirmed: 203.44.18.77
+]],
+        },
+        {
+            id          = "ch2_sticky_note",
+            instruction = "Inspect the sticky note in the world to confirm the admin credential hint.",
+            hint        = "Walk to the sticky note and interact with it. The interaction submits automatically.",
+            validCommands = { "world_sticky_note inspect" },
+            output      = [[
+[*] Sticky note inspected.
+[*] Training reminder recovered: admin portal credential pair still in use.
+[*] Next: open the admin portal and verify access with those credentials.
+]],
+        },
+        {
+            id          = "ch2_admin_portal",
+            instruction = "Open the browser admin portal.",
+            hint        = "Use the tablet browser and visit bloxplay.com/admin.",
+            validCommands = {
+                "browser_visit bloxplay.com/admin",
+                "browser_visit www.bloxplay.com/admin",
+            },
+            output      = [[
+[*] Admin portal reached (sim).
+[*] Authentication page loaded for bloxplay-admin.
+[*] Submit the recovered credentials to verify they are valid.
+]],
+        },
+        {
+            id          = "ch2_admin_login",
+            instruction = "Log into the admin portal using the recovered sticky-note credentials.",
+            hint        = "Use username bloxplay-admin with the recovered password, then press Login.",
+            validCommands = { "browser_admin_login bloxplay.com/admin" },
+            output      = [[
+[*] Admin login accepted (sim).
+[*] Recovered sticky-note credentials verified against the portal.
 [*] Chapter complete. Proceed to Chapter 3.
 ]],
             isLastStep  = true,
