@@ -28,6 +28,7 @@ local LOAD_REMOTE_NAME = "LoadSavedProgress"
 local SAVE_STATUS_REMOTE_NAME = "GetSavedProgressStatus"
 local CLEAR_SAVE_REMOTE_NAME = "ClearSavedProgress"
 local START_OVER_REMOTE_NAME = "StartOverProgress"
+local CLEANUP_REMOTE_NAME = "Cleanup"
 local DISCLAIMER_REMOTE_NAME = "DisclaimerCompleted"
 local DISCLAIMER_AUDIO_ID = "rbxassetid://104592562370100"
 local DISCLAIMER_AUDIO_FALLBACK_DURATION = 28
@@ -1714,59 +1715,96 @@ createPopupPanel = function(title, contentSize)
 	return popup, contentArea
 end
 
--- GLOBAL BACK TO MENU BUTTON (top left, always on top)
-local globalBackBtn = nil
-local function ensureGlobalBackBtn()
-	if globalBackBtn and globalBackBtn.Parent then return end
-	globalBackBtn = createButton({
-		parent = playerGui,
+-- Back to menu uses StarterGui > MenuGui > Menu when present.
+local backToMenuBtn = nil
+local fallbackBackGui = nil
+
+local function fireBackToMenuCleanup()
+	local remotes = getRemotesFolder()
+	local cleanupRemote = remotes and remotes:FindFirstChild(CLEANUP_REMOTE_NAME)
+	if cleanupRemote and cleanupRemote:IsA("RemoteEvent") then
+		cleanupRemote:FireServer()
+	end
+end
+
+local function positionBackToMenuButton(button)
+	if not button or not button:IsA("GuiButton") then
+		return
+	end
+
+	local parentGui = button:FindFirstAncestorOfClass("ScreenGui")
+	if parentGui then
+		parentGui.ResetOnSpawn = false
+		parentGui.DisplayOrder = math.max(parentGui.DisplayOrder, 1000)
+	end
+
+	button.AnchorPoint = Vector2.new(1, 0)
+	button.Position = UDim2.new(1, -44, 0, 38)
+	button.Size = UDim2.new(0, 160, 0, 40)
+	button.ZIndex = math.max(button.ZIndex, 1000)
+	button.Visible = false
+end
+
+local function createFallbackBackButton()
+	fallbackBackGui = Instance.new("ScreenGui")
+	fallbackBackGui.Name = "GlobalBackButtonGui"
+	fallbackBackGui.ResetOnSpawn = false
+	fallbackBackGui.IgnoreGuiInset = true
+	fallbackBackGui.DisplayOrder = 1000
+	fallbackBackGui.Parent = playerGui
+
+	local button = createButton({
+		parent = fallbackBackGui,
 		Text = "BACK TO MENU",
-		Size = UDim2.new(0, 160, 0, 40),
-		Position = UDim2.new(0, 24, 0, 24),
 		BackgroundColor3 = COLORS.CARD_BG,
 		BorderSizePixel = 0,
 		TextColor3 = COLORS.PRIMARY,
 		Font = Enum.Font.GothamBold,
 		TextSize = 15,
 		AutoButtonColor = false,
-		ZIndex = 1000,
-		Visible = false,
 	})
-	roundCorners(globalBackBtn, 10)
-	addStroke(globalBackBtn, COLORS.PRIMARY, 2, 0.7)
-	animateButtonHover(globalBackBtn, COLORS.CARD_BG, COLORS.PRIMARY)
-	globalBackBtn.MouseButton1Click:Connect(function()
-		globalBackBtn.Visible = false
+	roundCorners(button, 10)
+	addStroke(button, COLORS.PRIMARY, 2, 0.7)
+	animateButtonHover(button, COLORS.CARD_BG, COLORS.PRIMARY)
+	return button
+end
+
+local function getBackToMenuButton()
+	local menuGui = playerGui:FindFirstChild("MenuGui")
+	local menuButton = menuGui and menuGui:FindFirstChild("Menu")
+	if menuButton and menuButton:IsA("GuiButton") then
+		if fallbackBackGui then
+			fallbackBackGui:Destroy()
+			fallbackBackGui = nil
+		end
+		return menuButton
+	end
+
+	return createFallbackBackButton()
+end
+
+backToMenuBtn = getBackToMenuButton()
+positionBackToMenuButton(backToMenuBtn)
+
+if backToMenuBtn then
+	backToMenuBtn.MouseButton1Click:Connect(function()
+		fireBackToMenuCleanup()
+		backToMenuBtn.Visible = false
+		refreshContinueButtonState()
 		screenGui.Enabled = true
 	end)
 end
 
-ensureGlobalBackBtn()
-
 screenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-	if not globalBackBtn or not globalBackBtn.Parent then ensureGlobalBackBtn() end
 	if screenGui.Enabled then
-		globalBackBtn.Visible = false
+		if backToMenuBtn then
+			backToMenuBtn.Visible = false
+		end
 		refreshContinueButtonState()
-	else
-		globalBackBtn.Visible = true
+	elseif backToMenuBtn then
+		backToMenuBtn.Visible = true
 	end
 end)
-
--- Connect Menu button in MenuGui to show main menu
-local menuBtn = nil
-pcall(function()
-	menuBtn = playerGui:WaitForChild("MenuGui"):WaitForChild("Menu")
-end)
-if menuBtn then
-	menuBtn.MouseButton1Click:Connect(function()
-		local screenGui = playerGui:FindFirstChild("ModernTitleScreen")
-		if screenGui then
-			refreshContinueButtonState()
-			screenGui.Enabled = true
-		end
-	end)
-end
 
 showTrainingDisclaimer(function()
 	screenGui.Enabled = true

@@ -7,7 +7,10 @@ local SuspicionManager = {}
 local MAX_VAL = 100
 local DEBUG_ENABLED = true
 local DECAY_INTERVAL_SECONDS = 1
-local DECAY_AMOUNT = 1
+local DECAY_AMOUNT = 1.5
+local ADDITION_INTERVAL_SECONDS = 0.35
+local ADDITION_AMOUNT_PER_TICK = 1.5
+local AUTHORITATIVE_SYNC_INTERVAL_SECONDS = 0.5
 local SYNC_REQUEST_COOLDOWN = 0.5
 
 local bindable = Instance.new("BindableEvent")
@@ -81,8 +84,13 @@ end
 
 local localSuspicion = 0
 local serverSuspicionByUserId = {}
+local pendingAdditionsByUserId = {}
 local syncRequestByUserId = {}
+local attributeConnectionsByUserId = {}
+local attributeRepairLogByUserId = {}
 local decayLoopStarted = false
+local additionLoopStarted = false
+local authoritativeSyncLoopStarted = false
 
 local function getServerSuspicion(player)
 	if not player then
@@ -101,6 +109,43 @@ local function syncPlayerAttribute(player, newValue)
 	if player and player.Parent then
 		player:SetAttribute("Suspicion", clampNumber(newValue))
 	end
+end
+
+local function restoreTrustedSuspicionAttribute(player)
+	if not player or not player.Parent then
+		return
+	end
+
+	local trusted = getServerSuspicion(player)
+	if clampNumber(player:GetAttribute("Suspicion")) == trusted then
+		return
+	end
+
+	local now = os.clock()
+	local lastLoggedAt = attributeRepairLogByUserId[player.UserId] or 0
+	if now - lastLoggedAt >= 1 then
+		attributeRepairLogByUserId[player.UserId] = now
+		debugLog(("Restored server-owned suspicion for %s -> %s"):format(player.Name, tostring(trusted)))
+	end
+
+	syncPlayerAttribute(player, trusted)
+	pushToClient(player, trusted)
+end
+
+local function watchSuspicionAttribute(player)
+	if not player then
+		return
+	end
+
+	local existing = attributeConnectionsByUserId[player.UserId]
+	if existing then
+		existing:Disconnect()
+	end
+
+	attributeConnectionsByUserId[player.UserId] = player:GetAttributeChangedSignal("Suspicion"):Connect(function()
+		restoreTrustedSuspicionAttribute(player)
+	end)
+	restoreTrustedSuspicionAttribute(player)
 end
 
 local function withinSyncCooldown(player)
@@ -124,6 +169,7 @@ local function setServerSuspicion(player, newValue)
 	end
 
 	local clamped = clampNumber(newValue)
+	pendingAdditionsByUserId[player.UserId] = nil
 	serverSuspicionByUserId[player.UserId] = clamped
 	syncPlayerAttribute(player, clamped)
 	pushToClient(player, clamped)
@@ -145,10 +191,66 @@ local function applyServerDelta(player, delta, options)
 	serverSuspicionByUserId[player.UserId] = newValue
 	syncPlayerAttribute(player, newValue)
 	if not (options and options.silent) then
-		debugLog(("%s %+d -> %d"):format(player.Name, signedDelta, newValue))
+		debugLog(("%s %+.1f -> %.1f"):format(player.Name, signedDelta, newValue))
 	end
 	pushToClient(player, newValue)
 	bindable:Fire(newValue, player)
+end
+
+local function enqueueServerAddition(player, amount)
+	if not player or not player.Parent then
+		return
+	end
+
+	local delta = clampDelta(amount)
+	if delta <= 0 then
+		return
+	end
+
+	local currentValue = getServerSuspicion(player)
+	local room = MAX_VAL - currentValue
+	if room <= 0 then
+		return
+	end
+
+	local userId = player.UserId
+	local pending = pendingAdditionsByUserId[userId] or 0
+	pendingAdditionsByUserId[userId] = math.min(pending + delta, room)
+end
+
+local function startServerAdditionLoop()
+	if additionLoopStarted or not RunService:IsServer() then
+		return
+	end
+
+	additionLoopStarted = true
+	task.spawn(function()
+		while true do
+			task.wait(ADDITION_INTERVAL_SECONDS)
+			for userId, pending in pairs(pendingAdditionsByUserId) do
+				if pending and pending > 0 then
+					local player = Players:GetPlayerByUserId(userId)
+					if player then
+						local room = MAX_VAL - getServerSuspicion(player)
+						if room > 0 then
+							local step = math.min(pending, ADDITION_AMOUNT_PER_TICK, room)
+							pendingAdditionsByUserId[userId] = pending - step
+							if pendingAdditionsByUserId[userId] <= 0.001 then
+								pendingAdditionsByUserId[userId] = nil
+							end
+							applyServerDelta(player, step)
+						else
+							pendingAdditionsByUserId[userId] = nil
+						end
+					else
+						pendingAdditionsByUserId[userId] = nil
+					end
+				else
+					pendingAdditionsByUserId[userId] = nil
+				end
+			end
+		end
+	end)
 end
 
 local function startServerDecayLoop()
@@ -170,6 +272,24 @@ local function startServerDecayLoop()
 	end)
 end
 
+local function startAuthoritativeSyncLoop()
+	if authoritativeSyncLoopStarted or not RunService:IsServer() then
+		return
+	end
+
+	authoritativeSyncLoopStarted = true
+	task.spawn(function()
+		while true do
+			task.wait(AUTHORITATIVE_SYNC_INTERVAL_SECONDS)
+			for _, player in ipairs(Players:GetPlayers()) do
+				local trusted = getServerSuspicion(player)
+				restoreTrustedSuspicionAttribute(player)
+				pushToClient(player, trusted)
+			end
+		end
+	end)
+end
+
 function SuspicionManager.Add(amount, player)
 	local delta = clampDelta(amount)
 	if delta <= 0 then
@@ -178,10 +298,10 @@ function SuspicionManager.Add(amount, player)
 
 	if RunService:IsServer() then
 		if player then
-			applyServerDelta(player, delta)
+			enqueueServerAddition(player, delta)
 		else
 			for _, candidate in ipairs(Players:GetPlayers()) do
-				applyServerDelta(candidate, delta)
+				enqueueServerAddition(candidate, delta)
 			end
 		end
 	else
@@ -267,19 +387,30 @@ end
 if RunService:IsServer() then
 	Players.PlayerAdded:Connect(function(player)
 		setServerSuspicion(player, 0)
+		watchSuspicionAttribute(player)
 		debugLog(("PlayerAdded sync -> %s = 0"):format(player.Name))
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
+		local connection = attributeConnectionsByUserId[player.UserId]
+		if connection then
+			connection:Disconnect()
+		end
+		attributeConnectionsByUserId[player.UserId] = nil
+		attributeRepairLogByUserId[player.UserId] = nil
 		serverSuspicionByUserId[player.UserId] = nil
+		pendingAdditionsByUserId[player.UserId] = nil
 		syncRequestByUserId[player.UserId] = nil
 	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		setServerSuspicion(player, 0)
+		watchSuspicionAttribute(player)
 	end
 
 	startServerDecayLoop()
+	startServerAdditionLoop()
+	startAuthoritativeSyncLoop()
 
 	actionRemote.OnServerEvent:Connect(function(player, action)
 		if type(action) ~= "string" then
@@ -301,7 +432,7 @@ if RunService:IsServer() then
 else
 	updateRemote.OnClientEvent:Connect(function(newValue)
 		localSuspicion = clampNumber(newValue)
-		debugLog(("Client sync -> %d"):format(localSuspicion))
+		debugLog(("Client sync -> %.1f"):format(localSuspicion))
 		bindable:Fire(localSuspicion)
 	end)
 

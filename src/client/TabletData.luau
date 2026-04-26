@@ -353,7 +353,7 @@ Quick Links:
 - hackos://tips
 - hackos://apps
 - mail.bloxplay.com
-- RBXPacketNet.com
+- RBXPacketAnalyzer.com
 - bloxplay.com/admin
 - RBXIPBlocker.com
 
@@ -374,7 +374,7 @@ Training Path:
 - Terminal
 - Browser
 - BloxMail (mail.bloxplay.com)
-- Packet Analyzer (RBXPacketNet.com)
+- Packet Analyzer (RBXPacketAnalyzer.com)
 - Admin Portal (bloxplay.com/admin)
 - Emergency Source Blocker (RBXIPBlocker.com)]],
     ["mail.bloxplay.com"] = [[BloxMail (SIM)
@@ -385,10 +385,14 @@ Staff inbox ready. Classify each message with Report or Pass Through.]],
 Use the browser login form.]],
     ["www.bloxplay.com/admin"] = [[BLOXPLAY ADMIN LOGIN (SIM)
 Use the browser login form.]],
-    ["rbxpacketnet.com"] = [[RBXPacketNet (SIM)
-Browser packet analyzer ready.]],
-    ["www.rbxpacketnet.com"] = [[RBXPacketNet (SIM)
-Browser packet analyzer ready.]],
+    ["rbxpacketanalyzer.com"] = [[RBXPacketAnalyzer (SIM)
+Authorized browser packet analyzer ready.]],
+    ["www.rbxpacketanalyzer.com"] = [[RBXPacketAnalyzer (SIM)
+Authorized browser packet analyzer ready.]],
+    ["rbxpacketnet.com"] = [[RBXPacketAnalyzer (SIM)
+Legacy PacketNet alias loaded. Authorized browser packet analyzer ready.]],
+    ["www.rbxpacketnet.com"] = [[RBXPacketAnalyzer (SIM)
+Legacy PacketNet alias loaded. Authorized browser packet analyzer ready.]],
     ["rbxipblocker.com"] = [[RBXIPBlocker (SIM)
 Emergency source blocking console ready.]],
     ["www.rbxipblocker.com"] = [[RBXIPBlocker (SIM)

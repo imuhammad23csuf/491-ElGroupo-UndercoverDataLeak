@@ -1,6 +1,6 @@
 -- TimeLeaderboard.client.luau
 -- Shows a top-right on-screen leaderboard of fastest mission times.
--- Press TAB to toggle open/closed.
+-- Press L to toggle open/closed.
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -20,7 +20,7 @@ local PANEL_WIDTH   = 260
 local ROW_HEIGHT    = 36
 local HEADER_HEIGHT = 48
 local MAX_ROWS      = 10
-local TOGGLE_KEY    = Enum.KeyCode.Tab
+local TOGGLE_KEY    = Enum.KeyCode.L
 
 -- ─── Colors (matching suspicion meter dark style) ────────────────────────────
 local COLOR_BG        = Color3.fromRGB(10, 10, 18)
@@ -89,7 +89,7 @@ titleLabel.TextXAlignment       = Enum.TextXAlignment.Left
 titleLabel.Text                 = "🏆  FASTEST TIMES"
 titleLabel.Parent               = header
 
--- TAB hint label (top-right of header)
+-- Toggle hint label (top-right of header)
 local hintLabel = Instance.new("TextLabel")
 hintLabel.Size                  = UDim2.new(0, 60, 1, 0)
 hintLabel.Position              = UDim2.new(1, -64, 0, 0)
@@ -98,7 +98,7 @@ hintLabel.Font                  = Enum.Font.GothamMedium
 hintLabel.TextSize              = 11
 hintLabel.TextColor3            = Color3.fromRGB(200, 220, 255)
 hintLabel.TextTransparency      = 0.3
-hintLabel.Text                  = "[TAB]"
+hintLabel.Text                  = "[L]"
 hintLabel.Parent                = header
 
 -- Row container
@@ -289,11 +289,11 @@ tabIcon.BackgroundTransparency = 1
 tabIcon.Font                 = Enum.Font.GothamBlack
 tabIcon.TextSize             = 12
 tabIcon.TextColor3           = Color3.fromRGB(255, 255, 255)
-tabIcon.Text                 = "🏆\nTAB"
+tabIcon.Text                 = "🏆\nL"
 tabIcon.Parent               = tabHint
 
 tabHint.MouseButton1Click:Connect(function()
 	setOpen(not isOpen)
 end)
 
-print("[TimeLeaderboard] Client leaderboard loaded. Press TAB to toggle.")
+print("[TimeLeaderboard] Client leaderboard loaded. Press L to toggle.")

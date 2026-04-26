@@ -30,9 +30,21 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
     end
     if infectedCount >= 2 then
         push(adminLogFeed.live[2], ("%d office endpoints now report rapid rename activity consistent with live ransomware spread."):format(infectedCount))
+        logs[#logs + 1] = {
+            severity = "CRITICAL",
+            title = "Lateral movement detected",
+            detail = ("WannaWail is pivoting between internal endpoints. %d machines now show coordinated spread behavior."):format(infectedCount),
+            stamp = "08:15",
+        }
     end
     if infectedCount >= 3 then
         push(adminLogFeed.live[3], ("%d user-facing screens now show WannaWail banners. Latest hit: %s."):format(infectedCount, lastMachine))
+        logs[#logs + 1] = {
+            severity = "CRITICAL",
+            title = "Cross-host propagation accelerating",
+            detail = ("Lateral movement reached additional user systems. Latest compromised endpoint: %s."):format(lastMachine),
+            stamp = "08:16",
+        }
     end
     if active and not processKilled then
         push(adminLogFeed.live[4], "The sync_jobs.sh process is still alive on PlayerData_Vault and continues coordinating the outbreak.")

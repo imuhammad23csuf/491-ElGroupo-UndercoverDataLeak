@@ -1,0 +1,41 @@
+{
+  "languageMode": "nonstrict",
+  "globals": [
+    "game",
+    "workspace",
+    "script",
+    "shared",
+    "_G",
+    "Instance",
+    "Enum",
+    "UDim",
+    "UDim2",
+    "Color3",
+    "Vector2",
+    "Vector3",
+    "CFrame",
+    "TweenInfo",
+    "ColorSequence",
+    "ColorSequenceKeypoint",
+    "RaycastParams",
+    "Random",
+    "task",
+    "tick",
+    "warn",
+    "print",
+    "typeof",
+    "describe",
+    "it",
+    "expect",
+    "beforeEach",
+    "afterEach"
+  ],
+  "lint": {
+    "LocalUnused": false,
+    "FunctionUnused": false,
+    "ImportUnused": false,
+    "MultiLineStatement": false,
+    "ImplicitReturn": false,
+    "UnknownType": false
+  }
+}

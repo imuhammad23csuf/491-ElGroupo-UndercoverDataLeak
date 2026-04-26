@@ -114,10 +114,10 @@ end
 
 local function normalizeAngle(angle)
 	while angle > math.pi do
-		angle -= math.pi * 2
+		angle = angle - math.pi * 2
 	end
 	while angle < -math.pi do
-		angle += math.pi * 2
+		angle = angle + math.pi * 2
 	end
 	return angle
 end
@@ -342,7 +342,7 @@ local function buildCameraState(model)
 end
 
 local function updateSweep(state, dt)
-	state.currentYaw += state.sweepDirection * state.sweepSpeed * dt
+	state.currentYaw = state.currentYaw + state.sweepDirection * state.sweepSpeed * dt
 
 	if state.currentYaw >= state.sweepAngle then
 		state.currentYaw = state.sweepAngle
@@ -415,32 +415,31 @@ while true do
 				updateIndicator(state, nil)
 			end
 		end
-		continue
-	end
+	else
+		for _, state in ipairs(cameraStates) do
+			if not updateTracking(state, now, dt) then
+				updateSweep(state, dt)
 
-	for _, state in ipairs(cameraStates) do
-		if not updateTracking(state, now, dt) then
-			updateSweep(state, dt)
+				local player, root = findNearestVisiblePlayer(state)
+				if player and root then
+					state.targetPlayer = player
 
-			local player, root = findNearestVisiblePlayer(state)
-			if player and root then
-				state.targetPlayer = player
+					local targetYaw = math.clamp(
+						getYawToTarget(state.rotationBaseCFrame, root.Position),
+						-state.sweepAngle,
+						state.sweepAngle
+					)
 
-				local targetYaw = math.clamp(
-					getYawToTarget(state.rotationBaseCFrame, root.Position),
-					-state.sweepAngle,
-					state.sweepAngle
-				)
+					state.currentYaw = moveTowardAngle(state.currentYaw, targetYaw, state.trackSpeed * dt)
+					applyYaw(state)
 
-				state.currentYaw = moveTowardAngle(state.currentYaw, targetYaw, state.trackSpeed * dt)
-				applyYaw(state)
+					if now >= state.nextSuspicionTick and canSeePlayer(state, root) then
+						addPendingSuspicion(player, SUSPICION_PER_TICK)
+						state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+					end
 
-				if now >= state.nextSuspicionTick and canSeePlayer(state, root) then
-					addPendingSuspicion(player, SUSPICION_PER_TICK)
-					state.nextSuspicionTick = now + SUSPICION_TICK_RATE
+					updateIndicator(state, player)
 				end
-
-				updateIndicator(state, player)
 			end
 		end
 	end

@@ -531,7 +531,7 @@ Padding = UDim.new(0, 5),
 SortOrder = Enum.SortOrder.LayoutOrder,
 })
 buildQuickLink(LinkBar, "🏠 Home", "hackos://home", 0)
-buildQuickLink(LinkBar, "📡 PacketNet", "rbxpacketnet.com", 118)
+buildQuickLink(LinkBar, "📡 Analyzer", "rbxpacketanalyzer.com", 118)
 buildQuickLink(LinkBar, "🔐 Admin", "bloxplay.com/admin", 236)
 buildQuickLink(LinkBar, "🛡 Block", "rbxipblocker.com", 354)
 BrowserContent = mk("Frame", {
@@ -774,7 +774,7 @@ Visible = false,
 mk("TextLabel", {
 Parent = PacketPage,
 BackgroundTransparency = 1,
-Text = "RBXPacketNet",
+Text = "RBXPacketAnalyzer",
 Font = Enum.Font.GothamBlack,
 TextSize = 16,
 TextColor3 = Color3.fromRGB(30, 40, 58),
@@ -785,7 +785,7 @@ TextXAlignment = Enum.TextXAlignment.Left,
 mk("TextLabel", {
 Parent = PacketPage,
 BackgroundTransparency = 1,
-Text = "Targeted Packet Capture (SIM)",
+Text = "Targeted Packet Capture (Authorized SIM)",
 Font = Enum.Font.Gotham,
 TextSize = 11,
 TextColor3 = Color3.fromRGB(88, 98, 114),
@@ -1272,7 +1272,7 @@ local host = getHostByIP(ip)
 if result and result.success then
 setBrowserStatus(("Capture verified for %s [%s]. Mission step complete."):format(host.label, host.ip))
 else
-setBrowserStatus(("Capturing packets for %s [%s] (sim)"):format(host.label, host.ip))
+setBrowserStatus(("Capturing packets for %s [%s] (authorized sim)"):format(host.label, host.ip))
 end
 else
 populatePacketRows()
@@ -1286,7 +1286,7 @@ ActivePacketCapture.targetIP = ""
 ActivePacketCapture.targetLabel = ""
 ActivePacketCapture.rows = {}
 populatePacketRows()
-setBrowserStatus("RBXPacketNet filters cleared (sim)")
+setBrowserStatus("RBXPacketAnalyzer filters cleared (sim)")
 end)
 PacketFollowBtn.MouseButton1Click:Connect(function()
 if PacketIPBox.Text == "" then

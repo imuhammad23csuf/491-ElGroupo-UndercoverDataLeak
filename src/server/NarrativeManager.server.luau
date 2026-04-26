@@ -1,6 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local DialogueData = require(script.Parent.DialogueData)
-local SuspicionManager = require(script.Parent.SuspicionManager)
+local DialogueData = require(ReplicatedStorage.Shared.DialogueData)
 local IntegrityService = require(ReplicatedStorage.Shared.IntegrityService)
 
 local NarrativeManager = {}
@@ -113,7 +112,7 @@ function NarrativeManager.chooseOption(player, choiceIndex)
 	end
 
 	if choice.integrity then
-		SuspicionManager.addSuspicion(player, -choice.integrity)
+		IntegrityService.addIntegrity(player, choice.integrity)
 	end
 
 	if not choice.next then

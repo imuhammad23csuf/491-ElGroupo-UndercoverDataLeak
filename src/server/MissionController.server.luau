@@ -45,10 +45,6 @@ Players.PlayerAdded:Connect(function(player)
 
 	task.delay(2, function()
 		syncPlayerObjectives(player)
-		-- Start mission timer once objectives are synced
-		if _G.MissionTimer then
-			_G.MissionTimer.startMission(player)
-		end
 	end)
 end)
 

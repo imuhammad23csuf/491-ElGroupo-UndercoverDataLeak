@@ -22,7 +22,12 @@ local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or Instance.ne
 remotesFolder.Name = "Remotes"
 remotesFolder.Parent = ReplicatedStorage
 
-local DistractRemote = remotesFolder:FindFirstChild("DistractOutGuard") or Instance.new("RemoteEvent")
+local DistractRemote = remotesFolder:FindFirstChild("DistractOutGuard")
+if DistractRemote and not DistractRemote:IsA("RemoteFunction") then
+    DistractRemote:Destroy()
+    DistractRemote = nil
+end
+DistractRemote = DistractRemote or Instance.new("RemoteFunction")
 DistractRemote.Name = "DistractOutGuard"
 DistractRemote.Parent = remotesFolder
 
@@ -51,6 +56,9 @@ local SUSPICION_TICK_RATE = 0.25
 
 -- Distraction tuning
 local DISTRACT_DURATION = 15
+local DISTRACT_COOLDOWN = 20
+local DISTRACT_MAX_RANGE = 160
+local HACK_TABLET_NAME = "HackTablet"
 local PHONE_ANIM_ID = "rbxassetid://85133448172500"
 
 local DISTRACT_LINES = {
@@ -72,6 +80,22 @@ local DISTRACT_LINES = {
     "I swear this place is haunted by bad decisions.",
     "One more prank and I'm filing a strongly worded report.",
     "Do I look like a one-man emergency hotline?"
+}
+
+local CHASE_LINES = {
+    "Hey! You! Stop!",
+    "Running just makes my shift longer.",
+    "I have eyes on you!",
+    "Get back here!",
+    "Security breach outside!",
+}
+
+local GIVE_UP_LINES = {
+    "Lost them. Returning to patrol.",
+    "Must have been the wind.",
+    "Area clear, I guess.",
+    "I am too tired for false alarms.",
+    "Back to my route.",
 }
 
 -- === SUSPICION THROTTLE/BATCH ===
@@ -152,6 +176,7 @@ end
 -- === DISTRACTION STATE ===
 local isDistracted = false
 local distractionEndsAt = 0
+local distractCooldownByUserId = {}
 
 local currentPoint = 1
 local currentState = State.PATROL
@@ -203,6 +228,18 @@ local function setState(nextState)
     clearMoveGoal()
 end
 
+local function showSpeechBubble(text)
+    GuardDialogueRemote:FireAllClients(RIG, text)
+end
+
+local function sayRandomLine(lines)
+    if not lines or #lines == 0 then
+        return
+    end
+
+    showSpeechBubble(lines[math.random(1, #lines)])
+end
+
 local function startPatrol(holdDuration)
     clearActiveTarget(true)
     lastSeenPos = nil
@@ -219,6 +256,7 @@ local function startChase(player, playerRoot)
     HUMANOID.WalkSpeed = CHASE_SPEED
     playWalk()
     setState(State.CHASE)
+    sayRandomLine(CHASE_LINES)
 end
 
 local function startSearch()
@@ -233,10 +271,7 @@ local function startReturn()
     HUMANOID.WalkSpeed = PATROL_SPEED
     playWalk()
     setState(State.RETURN)
-end
-
-local function showSpeechBubble(text)
-    GuardDialogueRemote:FireAllClients(RIG, text)
+    sayRandomLine(GIVE_UP_LINES)
 end
 
 local function beginDistraction()
@@ -291,8 +326,63 @@ local function beginDistraction()
     end)
 end
 
-DistractRemote.OnServerEvent:Connect(function()
+local function canRequestDistraction(player)
+    if not player or player.Parent ~= Players then
+        return false, "Invalid player request."
+    end
+
+    local hasEquippedTablet = player:GetAttribute("HackTabletEquipped") == true
+    if not hasEquippedTablet then
+        local character = player.Character
+        local equippedTool = character and character:FindFirstChildOfClass("Tool")
+        hasEquippedTablet = equippedTool ~= nil and equippedTool.Name == HACK_TABLET_NAME
+    end
+
+    if not hasEquippedTablet then
+        return false, "Equip the HackTablet before requesting a guard distraction."
+    end
+
+    if isDistracted then
+        return false, "Guard is already distracted."
+    end
+
+    local character = player.Character
+    local playerRoot = character and character:FindFirstChild("HumanoidRootPart")
+    if not playerRoot or (playerRoot.Position - HRP.Position).Magnitude > DISTRACT_MAX_RANGE then
+        return false, "Move closer to the outside guard before sending the distraction."
+    end
+
+    local now = os.clock()
+    local lastRequestedAt = distractCooldownByUserId[player.UserId] or 0
+    if now - lastRequestedAt < DISTRACT_COOLDOWN then
+        local remaining = math.ceil(DISTRACT_COOLDOWN - (now - lastRequestedAt))
+        return false, string.format("Guard distraction is cooling down (%ds remaining).", math.max(remaining, 1))
+    end
+
+    distractCooldownByUserId[player.UserId] = now
+    return true, "Outside guard distracted for 15 seconds."
+end
+
+DistractRemote.OnServerInvoke = function(player)
+    local ok, message = canRequestDistraction(player)
+    if not ok then
+        return {
+            success = false,
+            message = message,
+        }
+    end
+
     beginDistraction()
+
+    return {
+        success = true,
+        message = message,
+        duration = DISTRACT_DURATION,
+    }
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    distractCooldownByUserId[player.UserId] = nil
 end)
 
 -- === PATROL POINTS ===
