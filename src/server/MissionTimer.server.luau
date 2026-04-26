@@ -130,14 +130,6 @@ local function endMission(player: Player, outcome: string): number?
 	-- Always send elapsed to client regardless of outcome
 	EvStopTimer:FireClient(player, elapsed, outcome)
 
-	if outcome == "caught" then
-    -- Restart the timer automatically after a short delay
-    task.delay(3, function()
-        	if player and player.Parent then
-            	startMission(player)
-        	end
-    	end)
-	end
 
 	-- Only save/compare best time on successful escape
 	if outcome == "escaped" then
@@ -150,7 +142,9 @@ local function endMission(player: Player, outcome: string): number?
 		end
 	end
 
-	broadcastLeaderboard()
+	if outcome == "escaped" then
+		broadcastLeaderboard()
+	end
 
 	print(("[MissionTimer] Mission ended for %s | outcome=%s | time=%.2fs"):format(
 		player.Name, outcome, elapsed))
