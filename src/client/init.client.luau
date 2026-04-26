@@ -1,2 +1,2 @@
-local controller = script.Parent:WaitForChild("SuspicionController")
+local controller = script:WaitForChild("SuspicionController")
 require(controller).init()
