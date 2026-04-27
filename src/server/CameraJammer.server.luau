@@ -7,10 +7,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Players = game:GetService("Players")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local CyberScenarioManager = require(Shared:WaitForChild("CyberScenarioManager"))
 
 local JAM_DURATION = 60
 local JAM_STATE_ATTRIBUTE = "CameraNetworkJamUntil"
 local COOLDOWN = 10
+local HACK_TABLET_NAME = "HackTablet"
 
 -- Per-player cooldown tracked with os.clock() (server-only timing, no network dependency)
 local playerCooldowns = {}
@@ -33,6 +36,16 @@ if not JamRemote then
     JamRemote.Parent = remotesFolder
 end
 
+local function hasEquippedTablet(player)
+    if player:GetAttribute("HackTabletEquipped") == true then
+        return true
+    end
+
+    local char = player.Character
+    local equippedTool = char and char:FindFirstChildOfClass("Tool")
+    return equippedTool ~= nil and equippedTool.Name == HACK_TABLET_NAME
+end
+
 JamRemote.OnServerInvoke = function(player, _target)
     -- Validate player is alive and in game
     if not player or not player.Parent then
@@ -42,6 +55,14 @@ JamRemote.OnServerInvoke = function(player, _target)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then
         return { success = false, message = "Camera jammer unavailable." }
+    end
+
+    if not hasEquippedTablet(player) then
+        return { success = false, message = "Equip the HackTablet before using Camera Jammer." }
+    end
+
+    if not CyberScenarioManager.hasActiveScenario(player) then
+        return { success = false, message = "Camera jammer is only available during an active mission." }
     end
 
     -- Workspace:GetServerTimeNow() is used here because the client reads this

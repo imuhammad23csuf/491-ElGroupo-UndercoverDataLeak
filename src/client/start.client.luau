@@ -396,10 +396,15 @@ local function animateButtonHover(button, normalColor, hoverColor)
 	end)
 end
 
-local function closePopup()
+local function closePopup(immediate)
 	if activePopup and activePopup.Parent then
 		local popupToClose = activePopup
 		activePopup = nil
+
+		if immediate then
+			popupToClose:Destroy()
+			return
+		end
 
 		local overlay = popupToClose:FindFirstChild("Overlay")
 		local panel = popupToClose:FindFirstChild("Panel")
@@ -1333,17 +1338,20 @@ local function startMissionFlow(scenarioId)
 		return
 	end
 
+	-- Close instantly so button press feels immediate.
+	screenGui.Enabled = false
+	closePopup(true)
+
 	local okLoad, result, err = pcall(function()
 		return loadScenarioRemote:InvokeServer(scenarioId)
 	end)
 	if not okLoad or type(result) ~= "table" then
+		screenGui.Enabled = true
 		notify("UNDERCOVER", tostring(err or "Could not start that chapter."), 3)
 		return
 	end
 
 	player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
-	screenGui.Enabled = false
-	closePopup()
 	notify("UNDERCOVER", "Check your tablet for instructions.", 3)
 
 	local evt = ReplicatedStorage:FindFirstChild("StartNewsCutscene")
@@ -1372,6 +1380,8 @@ loadProgressBtn.MouseButton1Click:Connect(function()
 	loadProgressBtn.Text = "Continuing..."
 	loadProgressBtn.Active = false
 	loadProgressBtn.Selectable = false
+	screenGui.Enabled = false
+	closePopup(true)
 
 	local ok, result = pcall(function()
 		return loadRemote:InvokeServer()
@@ -1379,6 +1389,7 @@ loadProgressBtn.MouseButton1Click:Connect(function()
 
 	if not ok or type(result) ~= "table" or not result.success then
 		local message = type(result) == "table" and result.message or "Could not continue from your saved progress."
+		screenGui.Enabled = true
 		refreshContinueButtonState()
 		notify("UNDERCOVER", message, 3)
 		return
@@ -1396,8 +1407,6 @@ loadProgressBtn.MouseButton1Click:Connect(function()
 		end
 	end
 
-	closePopup()
-	screenGui.Enabled = false
 	notify("UNDERCOVER", tostring(result.message or "Continuing from saved progress."), 3)
 end)
 

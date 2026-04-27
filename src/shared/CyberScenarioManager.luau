@@ -51,6 +51,15 @@ local scenarioOrder = {
     "Chapter4_IncidentResponse",
 }
 
+local function getScenarioOrderIndex(scenarioId)
+    for index, id in ipairs(scenarioOrder) do
+        if id == scenarioId then
+            return index
+        end
+    end
+    return nil
+end
+
 local function buildMissionObjectives(player)
     local session = activeSessions[player.UserId]
     local completed = completedScenarios[player.UserId] or {}
@@ -370,7 +379,6 @@ local function countResolvedEntries(resolvedMap)
     for _, resolved in pairs(resolvedMap or {}) do
         if resolved then
             count = count + 1
-            count += 1
         end
     end
 
@@ -556,6 +564,15 @@ function CyberScenarioManager.CanLoadScenario(player, scenarioId)
 
     if not ScenarioData[trimmed] then
         return nil, "Unknown chapter: " .. trimmed
+    end
+
+    local orderIndex = getScenarioOrderIndex(trimmed)
+    if orderIndex and orderIndex > 1 then
+        local completed = completedScenarios[player.UserId] or {}
+        local prerequisiteScenarioId = scenarioOrder[orderIndex - 1]
+        if completed[prerequisiteScenarioId] ~= true then
+            return nil, "Chapter is locked until the previous chapter is completed."
+        end
     end
 
     return trimmed, nil

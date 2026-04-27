@@ -56,7 +56,7 @@ local bestTimeLoaded = {}
 local requestWarnings = {}
 local MAX_BEST_TIME = 60 * 60 * 24
 
-local function sanitizeElapsedTime(value): number?
+local function sanitizeElapsedTime(value)
 	local n = tonumber(value)
 	if not n or n ~= n or n == math.huge or n == -math.huge or n < 0 or n > MAX_BEST_TIME then
 		return nil
@@ -65,7 +65,7 @@ local function sanitizeElapsedTime(value): number?
 	return math.floor(n * 100 + 0.5) / 100
 end
 
-local function warnRejectedClientRemote(player, remoteName: string)
+local function warnRejectedClientRemote(player, remoteName)
 	local userId = player.UserId
 	requestWarnings[userId] = requestWarnings[userId] or {}
 
@@ -80,11 +80,11 @@ local function warnRejectedClientRemote(player, remoteName: string)
 end
 
 -- ─── Helpers ─────────────────────────────────────────────────────────────────
-local function datastoreKey(player): string
+local function datastoreKey(player)
 	return "player_" .. player.UserId
 end
 
-local function loadBestTime(player): number?
+local function loadBestTime(player)
 	if bestTimeLoaded[player] then
 		return bestTimeCache[player]
 	end
@@ -103,7 +103,7 @@ local function loadBestTime(player): number?
 	return nil
 end
 
-local function saveBestTime(player, elapsed: number): number?
+local function saveBestTime(player, elapsed)
 	local sanitizedElapsed = sanitizeElapsedTime(elapsed)
 	if not sanitizedElapsed then
 		return bestTimeCache[player]
@@ -131,7 +131,7 @@ end
 
 -- Returns top-N best times as { {name, time} } sorted ascending
 local TOP_N = 10
-local function buildLeaderboardData(): {{name: string, time: number}}
+local function buildLeaderboardData()
 	-- We read from a sorted DataStore for efficiency in production;
 	-- here we use an OrderedDataStore pattern via a second store.
 	-- For simplicity this version collects from connected players only
@@ -158,7 +158,7 @@ end
 
 -- ─── Core API ────────────────────────────────────────────────────────────────
 
-local function getMissionElapsed(player): number
+local function getMissionElapsed(player)
 	local mission = activeMissions[player]
 	if not mission then
 		return 0
@@ -168,7 +168,7 @@ local function getMissionElapsed(player): number
 end
 
 --- Call this from MissionController (or any server script) when a mission begins.
-local function startMission(player, initialElapsed: number?)
+local function startMission(player, initialElapsed)
 	if activeMissions[player] then
 		EvStartTimer:FireClient(player, getMissionElapsed(player))
 		return
@@ -183,7 +183,7 @@ end
 --- Call this when the mission ends (caught OR escaped).
 --- outcome: "escaped" | "caught" | "completed" | "reset"
 --- Returns elapsed seconds.
-local function endMission(player, outcome: string): number?
+local function endMission(player, outcome)
 	local mission = activeMissions[player]
 	if not mission then
 		warn("[MissionTimer] No active mission for", player.Name)
@@ -202,9 +202,6 @@ local function endMission(player, outcome: string): number?
 
 	-- Only save/compare best time on successful mission completion.
 	if outcome == "escaped" or outcome == "completed" then
-
-	-- Only save/compare best time on successful escape
-	if outcome == "escaped" then
 		local previous = loadBestTime(player)
 		local newBest = saveBestTime(player, elapsed)
 		if newBest and (previous == nil or newBest < previous) then
@@ -212,9 +209,6 @@ local function endMission(player, outcome: string): number?
 			print(("[MissionTimer] NEW BEST for %s: %.2fs (was %s)"):format(
 				player.Name, newBest, previous and ("%.2fs"):format(previous) or "none"))
 		end
-	end
-
-	if outcome == "escaped" then
 		broadcastLeaderboard()
 	end
 

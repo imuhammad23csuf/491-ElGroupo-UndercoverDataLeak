@@ -28,6 +28,7 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
     if active and infectedCount >= 1 then
         push(adminLogFeed.live[1], ("Latest endpoint alert from %s shows outbound callback activity tied to %s."):format(lastMachine, config.WANNAWAIL_ATTACKER_IP))
     end
+
     if infectedCount >= 2 then
         push(adminLogFeed.live[2], ("%d office endpoints now report rapid rename activity consistent with live ransomware spread."):format(infectedCount))
         logs[#logs + 1] = {
@@ -37,6 +38,7 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
             stamp = "08:15",
         }
     end
+
     if infectedCount >= 3 then
         push(adminLogFeed.live[3], ("%d user-facing screens now show WannaWail banners. Latest hit: %s."):format(infectedCount, lastMachine))
         logs[#logs + 1] = {
@@ -46,12 +48,15 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
             stamp = "08:16",
         }
     end
+
     if active and not processKilled then
         push(adminLogFeed.live[4], "The sync_jobs.sh process is still alive on PlayerData_Vault and continues coordinating the outbreak.")
     end
+
     if infectedCount >= 4 and not sourceBlocked then
         push(adminLogFeed.live[5], ("Player export traffic is still trying to stage outbound transfer through %s while the outbreak remains active."):format(config.WANNAWAIL_ATTACKER_IP))
     end
+
     if sourceBlocked then
         logs[#logs + 1] = {
             severity = "HIGH",
@@ -60,6 +65,7 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
             stamp = "08:19",
         }
     end
+
     if firewallBlocked then
         logs[#logs + 1] = {
             severity = "MEDIUM",
@@ -68,6 +74,7 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
             stamp = "08:20",
         }
     end
+
     if processKilled then
         logs[#logs + 1] = {
             severity = "MEDIUM",
@@ -76,6 +83,7 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
             stamp = "08:21",
         }
     end
+
     if loaderRemoved then
         logs[#logs + 1] = {
             severity = "MEDIUM",
@@ -84,6 +92,7 @@ function TabletIncidentLogs.getWannaWailIncidentLogs(player, config, adminLogFee
             stamp = "08:22",
         }
     end
+
     if contained or (sourceBlocked and firewallBlocked and processKilled and loaderRemoved) then
         logs[#logs + 1] = {
             severity = "MEDIUM",

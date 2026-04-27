@@ -43,8 +43,8 @@ local MOVE_TIMEOUT = 8
 local MOVE_TARGET_EPSILON = 2
 
 -- Suspicion tuning (Inside)
-local SUSPICION_PER_TICK = 2
-local SUSPICION_TICK_RATE = 0.25
+local SUSPICION_PER_TICK = 1.2
+local SUSPICION_TICK_RATE = 0.35
 
 local CHASE_LINES = {
     "Hey! Stop right there!",
