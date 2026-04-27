@@ -226,6 +226,14 @@ end
 local function requestCameraJamFromTablet(options)
 options = options or {}
 browserState._markInteraction()
+
+if BrowserStatusLabel then
+BrowserStatusLabel.Text = "Sending camera jammer request..."
+end
+if options.echoTerminal and TermOut and TermOut.Parent then
+addLine("Camera jammer request sent...")
+end
+
 local labels = getVisibleCameraLabels()
 if #labels == 0 then
 local message = "No camera models detected by the tablet jammer."
