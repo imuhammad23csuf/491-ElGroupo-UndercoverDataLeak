@@ -4,6 +4,7 @@ local Workspace = game:GetService("Workspace")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("Shared")
 local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
+local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
 
 local UPDATE_RATE = 0.03
 local PUSH_INTERVAL = 0.5
@@ -20,18 +21,15 @@ local DEFAULT_VISION_ANGLE = 55
 
 local QUESTION_THRESHOLD = 50
 local EXCLAMATION_THRESHOLD = 100
+local CAMERA_LESSON_THROTTLE_SECONDS = 60
 
 local pendingSuspicion = {}
 local localSuspicionCache = {}
-local jamActive = false
 
-local function refreshJamState()
+local function isJamActive()
     local jamUntil = ReplicatedStorage:GetAttribute(JAM_STATE_ATTRIBUTE)
-    jamActive = typeof(jamUntil) == "number" and jamUntil > Workspace:GetServerTimeNow()
+    return typeof(jamUntil) == "number" and jamUntil > Workspace:GetServerTimeNow()
 end
-
-ReplicatedStorage:GetAttributeChangedSignal(JAM_STATE_ATTRIBUTE):Connect(refreshJamState)
-refreshJamState()
 
 local function addPendingSuspicion(player, amount)
     if not player then
@@ -39,9 +37,19 @@ local function addPendingSuspicion(player, amount)
     end
 
     local userId = player.UserId
-    pendingSuspicion[userId] = (pendingSuspicion[userId] or 0) + amount
+    pcall(function()
+        SuspicionManager.Add(amount, player)
+    end)
+
     local localValue = localSuspicionCache[userId] or 0
     localSuspicionCache[userId] = localValue + amount
+end
+
+local function triggerCameraLesson(player)
+    LessonManager.TriggerMistake(player, "CameraDetected", {
+        throttleKey = "camera_detected",
+        throttleWindow = CAMERA_LESSON_THROTTLE_SECONDS,
+    })
 end
 
 task.spawn(function()
@@ -378,6 +386,7 @@ local function updateTracking(state, now, dt)
     applyYaw(state)
 
     if canSeePlayer(state, root) and now >= state.nextSuspicionTick then
+        triggerCameraLesson(state.targetPlayer)
         addPendingSuspicion(state.targetPlayer, SUSPICION_PER_TICK)
         state.nextSuspicionTick = now + SUSPICION_TICK_RATE
     end
@@ -409,7 +418,7 @@ while true do
     local dt = math.max(now - lastTime, 0)
     lastTime = now
 
-    if jamActive then
+    if isJamActive() then
         for _, state in ipairs(cameraStates) do
             if state.targetPlayer then
                 state.targetPlayer = nil
@@ -435,6 +444,7 @@ while true do
                     applyYaw(state)
 
                     if now >= state.nextSuspicionTick and canSeePlayer(state, root) then
+                        triggerCameraLesson(player)
                         addPendingSuspicion(player, SUSPICION_PER_TICK)
                         state.nextSuspicionTick = now + SUSPICION_TICK_RATE
                     end

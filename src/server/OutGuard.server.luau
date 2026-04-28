@@ -107,8 +107,7 @@ local function queueSuspicion(player, amount)
         return
     end
 
-    local uid = player.UserId
-    pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+    SuspicionManager.Add(amount or 0, player)
 end
 
 local function flushSuspicion(player)
@@ -184,6 +183,7 @@ local stateStartTime = os.clock()
 local patrolHoldUntil = 0
 local activeTarget = nil
 local lastSeenPos = nil
+local lostSightSince = nil
 local returnTargetIndex = nil
 local nextSuspicionTick = 0
 local moveGoal = nil
@@ -219,6 +219,7 @@ local function clearActiveTarget(flushPending)
     end
 
     activeTarget = nil
+    lostSightSince = nil
     nextSuspicionTick = 0
 end
 
@@ -252,6 +253,7 @@ end
 local function startChase(player, playerRoot)
     activeTarget = player
     lastSeenPos = playerRoot and playerRoot.Position or lastSeenPos
+    lostSightSince = nil
     nextSuspicionTick = 0
     HUMANOID.WalkSpeed = CHASE_SPEED
     playWalk()
@@ -538,14 +540,20 @@ local function updateChaseState(now)
 
     if not canSeePlayer(targetHRP) then
         lastSeenPos = lastSeenPos or targetHRP.Position
-        startSearch()
+        lostSightSince = lostSightSince or now
+
+        if now - lostSightSince >= CHASE_TIMEOUT then
+            startReturn()
+            return
+        end
+
+        HUMANOID.WalkSpeed = CHASE_SPEED
+        playWalk()
+        issueMoveTo(lastSeenPos)
         return
     end
 
-    -- Player is visible: refresh the chase timer so the guard keeps pursuing
-    -- as long as it can see the player. The timeout only acts as a safety
-    -- valve for edge cases where sight is maintained for an unusually long time.
-    stateStartTime = now
+    lostSightSince = nil
 
     lastSeenPos = targetHRP.Position
     HUMANOID.WalkSpeed = CHASE_SPEED

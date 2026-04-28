@@ -4,6 +4,14 @@ local KeycardCopier = {}
 
 local playerAccessState = {}
 
+local function reportMissionProgress(player, methodName)
+	local missionController = _G.MissionController
+	local method = missionController and missionController[methodName]
+	if typeof(method) == "function" then
+		task.defer(method, player)
+	end
+end
+
 local function ensureAccessState(player)
 	if player == nil or player.UserId == nil then
 		return nil
@@ -71,6 +79,7 @@ function KeycardCopier.syncLegacyKeycardData(player)
 
 	if player:GetAttribute("HasKeycardData") == true then
 		state.hasKeycardData = true
+		reportMissionProgress(player, "MarkKeyCodeCopied")
 		return true
 	end
 
@@ -90,6 +99,7 @@ function KeycardCopier.grantKeycardData(player)
 
 	state.hasKeycardData = true
 	setServerMirror(player, "HasKeycardData", true)
+	reportMissionProgress(player, "MarkKeyCodeCopied")
 	return true
 end
 
@@ -112,6 +122,7 @@ function KeycardCopier.syncLegacySlidingDoorAccess(player)
 
 	if player:GetAttribute("UnlockedSlidingDoor") == true then
 		state.slidingDoorUnlocked = true
+		reportMissionProgress(player, "MarkSlidingDoorUnlocked")
 		return true
 	end
 
@@ -141,6 +152,7 @@ function KeycardCopier.grantSlidingDoorAccess(player)
 
 	state.slidingDoorUnlocked = true
 	setServerMirror(player, "UnlockedSlidingDoor", true)
+	reportMissionProgress(player, "MarkSlidingDoorUnlocked")
 	return true
 end
 
