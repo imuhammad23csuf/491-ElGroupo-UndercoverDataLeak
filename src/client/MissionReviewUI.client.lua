@@ -6,10 +6,13 @@ local player = Players.LocalPlayer
 local reviewEvent = ReplicatedStorage:WaitForChild("ShowMissionReview")
 
 local feedbackDatabase = {
-	["ReportedPhish"] = { good = true, title = "PHISHING ESCAPED", practice = "BEST PRACTICE: You verified the sender domain. Phishing is the #1 vector for corporate breaches." },
-	["ClickedPhish"] = { good = false, title = "SECURITY BREACH", practice = "VULNERABILITY: You clicked a malicious link. Always verify urgency and sender addresses." },
-	["RudeToCoworker"] = { good = false, title = "UNPROFESSIONAL CONDUCT", practice = "VULNERABILITY: You alienated staff. Social engineering requires building trust and rapport." },
-	["BypassedCamera"] = { good = true, title = "GHOST PROTOCOL", practice = "BEST PRACTICE: You evaded surveillance. Minimizing your digital footprint is vital." }
+    ["ReportedPhish"] = { good = true, title = "PHISHING ESCAPED", practice = "BEST PRACTICE: You verified the sender domain." },
+    ["ClickedPhish"] = { good = false, title = "SECURITY BREACH", practice = "VULNERABILITY: You clicked a malicious link." },
+    
+    -- Our new traps:
+    ["FoundStickyNotePassword"] = { good = false, title = "PHYSICAL BREACH", practice = "VULNERABILITY: You found admin credentials left in the open. Never write passwords on sticky notes." },
+    ["CaughtByCamera"] = { good = false, title = "SPOTTED", practice = "VULNERABILITY: You failed to evade the security cameras." },
+	["ClonedKeycard"] = { good = true, title = "RFID CLONED", practice = "VULNERABILITY: You demonstrated how easily unsecured physical badges can be copied via proximity." },
 }
 
 -- === UI GENERATION ===
