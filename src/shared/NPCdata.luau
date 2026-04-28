@@ -1,11 +1,12 @@
 local NPCdata = {
     ['Agent Ray' ] = {
-        "So you're that hacker we hired for this huh?",
-        "I'm Agent Ray, I'm here to give you your tools.",
-        "First is the ghost key. sneak behind a guard with this to copy their access codes for the main building",
-        "Next is the phack. this will let you hack into thier server room to get the data we need.",
-        " just so you know these are government tools, if you misuse them we'll know...",
-        "good luck out there",
+        "You made it. Good. Keep your voice low and your movements deliberate.",
+        "I am Special Agent Ray. I am coordinating the field side of the Bloxplay inquiry.",
+        "I can release two tools to you: the GhostKey and the HackTablet.",
+        "Use the GhostKey only when you are close enough to copy a guard's access code without being seen.",
+        "Use the HackTablet for network analysis, camera disruption, and authorized investigation steps.",
+        "These are controlled federal tools. Misuse them and this operation ends immediately.",
+        "Once this briefing closes, the tools are yours. Move quietly and document everything."
     },
 }
 
