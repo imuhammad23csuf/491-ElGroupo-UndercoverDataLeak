@@ -24,6 +24,7 @@ local function handleInspect(player)
         _G.MissionController.MarkStickyNoteFound(player)
     end
     CyberScenarioManager.CheckSolution(player, "world_sticky_note inspect")
+    require(game.ServerScriptService.Server.DecisionTracker).LogDecision(player, "FoundStickyNotePassword", true)
 end
 
 local function getBasePart(target)

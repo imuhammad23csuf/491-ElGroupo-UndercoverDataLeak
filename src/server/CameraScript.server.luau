@@ -36,6 +36,8 @@ local function addPendingSuspicion(player, amount)
         return
     end
 
+    player:SetAttribute("TrapCause", "CaughtByCamera")
+
     local userId = player.UserId
     pcall(function()
         SuspicionManager.Add(amount, player)

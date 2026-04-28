@@ -92,14 +92,15 @@ function KeycardCopier.hasKeycardData(player)
 end
 
 function KeycardCopier.grantKeycardData(player)
-	local state = ensureAccessState(player)
-	if not state then
-		return false
-	end
+    local state = ensureAccessState(player)
+    if not state then
+        return false
+    end
 
 	state.hasKeycardData = true
 	setServerMirror(player, "HasKeycardData", true)
 	reportMissionProgress(player, "MarkKeyCodeCopied")
+	require(game.ServerScriptService.Server.DecisionTracker).LogDecision(player, "ClonedKeycard", true)
 	return true
 end
 
