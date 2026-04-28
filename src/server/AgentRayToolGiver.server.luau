@@ -21,6 +21,8 @@ local TOOL_NAMES = {
 }
 
 local DIALOGUE_REMOTE_NAME = "AgentRayDialogueEvent"
+local TOOLS_RECEIVED_ATTRIBUTE = "AgentRayToolsReceived"
+local DIALOGUE_SEEN_ATTRIBUTE = "AgentRayDialogueSeen"
 local TOOL_NAME_SET = {}
 for _, toolName in ipairs(TOOL_NAMES) do
 	TOOL_NAME_SET[toolName] = true
@@ -170,6 +172,10 @@ local function isAgentRayToolAllowed(player)
 		return true
 	end
 
+	if player:GetAttribute(TOOLS_RECEIVED_ATTRIBUTE) == true then
+		return true
+	end
+
 	local handoffUntil = grantHandoffUntilByUserId[player.UserId]
 	return handoffUntil ~= nil and os.clock() <= handoffUntil
 end
@@ -199,7 +205,7 @@ local function schedulePendingToolCheck(player)
 	task.delay(PENDING_DIALOGUE_TOOL_CHECK_DELAY, function()
 		delayedPendingToolChecksByUserId[userId] = nil
 
-		if player.Parent ~= Players or isAgentRayToolAllowed(player) then
+		if player.Parent ~= Players or isAgentRayToolAllowed(player) or pendingGrantTokensByUserId[userId] then
 			return
 		end
 
@@ -217,6 +223,20 @@ local function enforceNoToolsBeforeVisit(player)
 		return
 	end
 
+	removeAgentTools(player)
+end
+
+local function removeToolsIfReceiptWasCleared(player)
+	if not player
+		or player:GetAttribute("HasSpokenToAgentRay") == true
+		or player:GetAttribute(TOOLS_RECEIVED_ATTRIBUTE) == true
+	then
+		return
+	end
+
+	pendingGrantTokensByUserId[player.UserId] = nil
+	delayedPendingToolChecksByUserId[player.UserId] = nil
+	grantHandoffUntilByUserId[player.UserId] = nil
 	removeAgentTools(player)
 end
 
@@ -247,6 +267,7 @@ local function grantTool(player, toolName)
 end
 
 local function markAgentRayVisited(player)
+	player:SetAttribute(TOOLS_RECEIVED_ATTRIBUTE, true)
 	player:SetAttribute("HasSpokenToAgentRay", true)
 
 	local missionController = _G.MissionController
@@ -261,10 +282,12 @@ local function handleAgentVisit(player)
 	end
 
 	local alreadyVisited = player:GetAttribute("HasSpokenToAgentRay") == true
+		or player:GetAttribute(TOOLS_RECEIVED_ATTRIBUTE) == true
 	pendingGrantTokensByUserId[player.UserId] = nil
 	pendingGrantPromptsByUserId[player.UserId] = nil
 	delayedPendingToolChecksByUserId[player.UserId] = nil
 	openGrantHandoffWindow(player)
+	player:SetAttribute(TOOLS_RECEIVED_ATTRIBUTE, true)
 	player:SetAttribute("AgentRayDialogueActive", false)
 	player:SetAttribute("AgentRayDialogueComplete", true)
 
@@ -437,6 +460,7 @@ local function scheduleAgentVisitAfterDialogue(player, prompt)
 	local token = ("%d:%.3f"):format(player.UserId, os.clock())
 	pendingGrantTokensByUserId[player.UserId] = token
 	pendingGrantPromptsByUserId[player.UserId] = prompt
+	player:SetAttribute(DIALOGUE_SEEN_ATTRIBUTE, true)
 	player:SetAttribute("AgentRayDialogueComplete", false)
 	player:SetAttribute("AgentRayDialogueActive", true)
 
@@ -552,12 +576,15 @@ local function watchPlayerContainer(player, container)
 
 	table.insert(playerConnections[player.UserId], container.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") and isToolName(child.Name) then
-			if player:GetAttribute("HasSpokenToAgentRay") == true then
+			if isAgentRayToolAllowed(player) then
 				task.defer(dedupePlayerTool, player, child.Name)
 				return
 			end
 
-			if pendingGrantTokensByUserId[player.UserId] then
+			if pendingGrantTokensByUserId[player.UserId]
+				or hasDialogueCompleteAttribute(player)
+				or player:GetAttribute(DIALOGUE_SEEN_ATTRIBUTE) == true
+			then
 				task.defer(handleAgentVisit, player)
 				return
 			end
@@ -571,12 +598,11 @@ local function connectPlayer(player)
 	playerConnections[player.UserId] = {}
 
 	table.insert(playerConnections[player.UserId], player:GetAttributeChangedSignal("HasSpokenToAgentRay"):Connect(function()
-		if player:GetAttribute("HasSpokenToAgentRay") ~= true then
-			pendingGrantTokensByUserId[player.UserId] = nil
-			delayedPendingToolChecksByUserId[player.UserId] = nil
-			grantHandoffUntilByUserId[player.UserId] = nil
-			removeAgentTools(player)
-		end
+		removeToolsIfReceiptWasCleared(player)
+	end))
+
+	table.insert(playerConnections[player.UserId], player:GetAttributeChangedSignal(TOOLS_RECEIVED_ATTRIBUTE):Connect(function()
+		removeToolsIfReceiptWasCleared(player)
 	end))
 
 	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
