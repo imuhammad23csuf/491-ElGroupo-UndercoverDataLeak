@@ -17,6 +17,8 @@
     "TweenInfo",
     "ColorSequence",
     "ColorSequenceKeypoint",
+    "NumberSequence",
+    "NumberSequenceKeypoint",
     "RaycastParams",
     "Random",
     "task",

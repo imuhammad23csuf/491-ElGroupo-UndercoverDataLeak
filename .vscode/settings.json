@@ -17,6 +17,8 @@
         "CFrame",
         "TweenInfo",
         "RaycastParams",
+        "NumberSequence",
+        "NumberSequenceKeypoint",
         "Random",
         "task",
         "tick",

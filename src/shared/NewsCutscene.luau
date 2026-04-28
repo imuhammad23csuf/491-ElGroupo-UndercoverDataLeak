@@ -404,10 +404,10 @@ local function startFakeClock(label, startHH, startMM)
 		while running and label and label.Parent do
 			label.Text = string.format("%02d:%02d", hh, mm)
 			task.wait(1)
-			ss += 1
+			ss = ss + 1
 			if ss >= 60 then
 				ss = 0
-				mm += 1
+				mm = mm + 1
 				if mm >= 60 then
 					mm = 0
 					hh = (hh + 1) % 24
@@ -468,7 +468,9 @@ function M.Play(player, opts)
 
 	local targetTotal = tonumber(opts.totalTime) or 60
 	local sum = 0
-	for _,h in ipairs(headlines) do sum += (h.duration or 3) end
+	for _, h in ipairs(headlines) do
+		sum = sum + (h.duration or 3)
+	end
 	local scale = (sum > 0) and (targetTotal / sum) or 1
 
 	local cam = workspace.CurrentCamera
@@ -555,8 +557,8 @@ function M.Play(player, opts)
 				for i = 2, #camFrames do
 					local ti = TweenInfo.new(math.max(0.75, perHop), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 					TweenService:Create(cam, ti, {CFrame = camFrames[i]}):Play()
-					local t0 = time()
-					while time() - t0 < perHop do
+					local t0 = os.clock()
+					while os.clock() - t0 < perHop do
 						if skip then break end
 						RunService.Heartbeat:Wait()
 					end
@@ -611,8 +613,8 @@ function M.Play(player, opts)
 		end
 
 		local dur = math.max(1, (item.duration or 3) * scale)
-		local t0 = time()
-		while time() - t0 < dur do
+		local t0 = os.clock()
+		while os.clock() - t0 < dur do
 			if skip then break end
 			RunService.Heartbeat:Wait()
 		end
@@ -634,9 +636,9 @@ function M.Play(player, opts)
 	-- ===== end audio: fade out news completely, THEN resume game
 	if news and news.IsPlaying then
 		local nv = news.Volume
-		local t0, dur = time(), 0.35
-		while time() - t0 < dur do
-			local a = (time() - t0)/dur
+		local t0, dur = os.clock(), 0.35
+		while os.clock() - t0 < dur do
+			local a = (os.clock() - t0)/dur
 			news.Volume = nv * (1-a)
 			RunService.Heartbeat:Wait()
 		end
@@ -654,9 +656,9 @@ function M.Play(player, opts)
 				gameMusic:Resume()
 			end
 
-			local t0, dur = time(), 0.45
-			while time() - t0 < dur do
-				local a = (time() - t0) / dur
+			local t0, dur = os.clock(), 0.45
+			while os.clock() - t0 < dur do
+				local a = (os.clock() - t0) / dur
 				gameMusic.Volume = (state.volume or 0.6) * a
 				RunService.Heartbeat:Wait()
 			end

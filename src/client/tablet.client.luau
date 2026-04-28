@@ -1471,19 +1471,17 @@ blockedIPs[#blockedIPs + 1] = ip
 end
 end
 end
-browserState = {
-adminLoggedIn = browser.adminLoggedIn == true,
-currentUrl = type(browser.currentUrl) == "string" and browser.currentUrl or "about:blank",
-stickyNoteInspected = browser.stickyNoteInspected == true,
-adminTab = browser.adminTab == "logs" and "logs" or "database",
-blockedIPs = blockedIPs,
-selectedMailId = type(browser.selectedMailId) == "string" and browser.selectedMailId or (type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or ""),
-logStreamStartedAt = 0,
-logsLastRender = 0,
-lastInteractionAt = os.clock(),
-idleAutoSaveNotified = false,
-visiblePanel = browser.visiblePanel == "browser" and "browser" or browser.visiblePanel == "missions" and "missions" or "terminal",
-}
+browserState.adminLoggedIn = browser.adminLoggedIn == true
+browserState.currentUrl = type(browser.currentUrl) == "string" and browser.currentUrl or "about:blank"
+browserState.stickyNoteInspected = browser.stickyNoteInspected == true
+browserState.adminTab = browser.adminTab == "logs" and "logs" or "database"
+browserState.blockedIPs = blockedIPs
+browserState.selectedMailId = type(browser.selectedMailId) == "string" and browser.selectedMailId or (type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or "")
+browserState.logStreamStartedAt = 0
+browserState.logsLastRender = 0
+browserState.lastInteractionAt = os.clock()
+browserState.idleAutoSaveNotified = false
+browserState.visiblePanel = browser.visiblePanel == "browser" and "browser" or browser.visiblePanel == "missions" and "missions" or "terminal"
 for key, value in pairs(previousBrowserState or {}) do
 if type(key) == "string" and key:sub(1, 1) == "_" then
 browserState[key] = value
@@ -1555,7 +1553,17 @@ if TermOut then
 resetTerminalOutput(PROMPT)
 end
 if TermInput then TermInput.Text = "" end
-browserState = { adminLoggedIn = false, currentUrl = "about:blank", stickyNoteInspected = false, adminTab = "database", blockedIPs = {}, selectedMailId = type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or "", logStreamStartedAt = 0, logsLastRender = 0, lastInteractionAt = os.clock(), idleAutoSaveNotified = false, visiblePanel = "terminal" }
+browserState.adminLoggedIn = false
+browserState.currentUrl = "about:blank"
+browserState.stickyNoteInspected = false
+browserState.adminTab = "database"
+browserState.blockedIPs = {}
+browserState.selectedMailId = type(CHAPTER3_MAILBOX[1]) == "table" and tostring(CHAPTER3_MAILBOX[1].id or "") or ""
+browserState.logStreamStartedAt = 0
+browserState.logsLastRender = 0
+browserState.lastInteractionAt = os.clock()
+browserState.idleAutoSaveNotified = false
+browserState.visiblePanel = "terminal"
 for key, value in pairs(previousBrowserState or {}) do
 if type(key) == "string" and key:sub(1, 1) == "_" then
 browserState[key] = value

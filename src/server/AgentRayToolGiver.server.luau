@@ -59,8 +59,9 @@ local playerConnections = {}
 local attachedAgents = {}
 local connectedPrompts = {}
 local pendingGrantTokensByUserId = {}
-<<<<<<< Updated upstream
 local pendingGrantPromptsByUserId = {}
+local delayedPendingToolChecksByUserId = {}
+local grantHandoffUntilByUserId = {}
 
 local dialogueRemote = ReplicatedStorage:FindFirstChild(DIALOGUE_REMOTE_NAME)
 if not dialogueRemote then
@@ -68,10 +69,6 @@ if not dialogueRemote then
 	dialogueRemote.Name = DIALOGUE_REMOTE_NAME
 	dialogueRemote.Parent = ReplicatedStorage
 end
-=======
-local delayedPendingToolChecksByUserId = {}
-local grantHandoffUntilByUserId = {}
->>>>>>> Stashed changes
 
 local function isToolName(name)
 	return TOOL_NAME_SET[tostring(name or "")] == true
@@ -265,15 +262,12 @@ local function handleAgentVisit(player)
 
 	local alreadyVisited = player:GetAttribute("HasSpokenToAgentRay") == true
 	pendingGrantTokensByUserId[player.UserId] = nil
-<<<<<<< Updated upstream
 	pendingGrantPromptsByUserId[player.UserId] = nil
-	player:SetAttribute("AgentRayDialogueActive", false)
-	player:SetAttribute("AgentRayDialogueComplete", true)
-=======
 	delayedPendingToolChecksByUserId[player.UserId] = nil
 	openGrantHandoffWindow(player)
->>>>>>> Stashed changes
-	markAgentRayVisited(player)
+	player:SetAttribute("AgentRayDialogueActive", false)
+	player:SetAttribute("AgentRayDialogueComplete", true)
+
 	if not alreadyVisited then
 		markAgentRayVisited(player)
 	end
@@ -282,23 +276,12 @@ local function handleAgentVisit(player)
 		grantTool(player, toolName)
 	end
 
-	task.delay(OPSEC_POPUP_DELAY_SECONDS, function()
-		if player.Parent ~= Players or player:GetAttribute("HasSpokenToAgentRay") ~= true then
-			return
-		end
-	end
-
 	if not alreadyVisited then
-		task.delay(0.25, function()
+		task.delay(OPSEC_POPUP_DELAY_SECONDS, function()
 			if player.Parent ~= Players or player:GetAttribute("HasSpokenToAgentRay") ~= true then
 				return
 			end
 
-		LessonManager.TriggerMistake(player, "PublicWifiOpsec", {
-			throttleKey = "agent_ray_cafe_tools",
-			throttleWindow = 60,
-		})
-	end)
 			LessonManager.TriggerMistake(player, "PublicWifiOpsec", {
 				throttleKey = "agent_ray_cafe_tools",
 				throttleWindow = 60,
@@ -313,7 +296,7 @@ _G.AgentRayToolGiver = {
 }
 
 local function getAgentDialogueDelay()
-	local lines = NPCdata["Agent Ray"] or NPCdata.AgentRay
+	local lines = NPCdata["Agent Ray"]
 	local lineCount = 4
 	if type(lines) == "table" then
 		lineCount = #lines
@@ -323,7 +306,7 @@ local function getAgentDialogueDelay()
 end
 
 local function getAgentDialogueLines()
-	local lines = NPCdata["Agent Ray"] or NPCdata.AgentRay
+	local lines = NPCdata["Agent Ray"]
 	if type(lines) ~= "table" or #lines == 0 then
 		return {
 			"I am Special Agent Ray. I have your tools ready.",
@@ -622,12 +605,9 @@ local function disconnectPlayer(player)
 
 	playerConnections[player.UserId] = nil
 	pendingGrantTokensByUserId[player.UserId] = nil
-<<<<<<< Updated upstream
 	pendingGrantPromptsByUserId[player.UserId] = nil
-=======
 	delayedPendingToolChecksByUserId[player.UserId] = nil
 	grantHandoffUntilByUserId[player.UserId] = nil
->>>>>>> Stashed changes
 end
 
 for _, descendant in ipairs(Workspace:GetDescendants()) do
