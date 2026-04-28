@@ -15,6 +15,7 @@ local function handleInspect(player)
 
     player:SetAttribute("RecoveredAdminCredentials", true)
     CyberScenarioManager.CheckSolution(player, "world_sticky_note inspect")
+    require(game.ServerScriptService.Server.DecisionTracker).LogDecision(player, "FoundStickyNotePassword", true)
 end
 
 local function getBasePart(target)

@@ -38,6 +38,8 @@ local function addPendingSuspicion(player, amount)
         return
     end
 
+    player:SetAttribute("TrapCause", "CaughtByCamera")
+
     local userId = player.UserId
     pendingSuspicion[userId] = (pendingSuspicion[userId] or 0) + amount
     local localValue = localSuspicionCache[userId] or 0

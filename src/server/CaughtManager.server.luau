@@ -127,6 +127,11 @@ local function handleCaught(player)
 	end
 
 	handlingCaughtByUserId[player.UserId] = true
+	
+	local cause = player:GetAttribute("TrapCause") or "DetectedBySecurity"
+    
+    require(game.ServerScriptService.Server.LessonManager).TriggerMistake(player, cause)
+    require(game.ServerScriptService.Server.DecisionTracker).LogDecision(player, cause, true)
 
 	showCaughtEvent:FireClient(player, true)
 	freezePlayer(player, true)

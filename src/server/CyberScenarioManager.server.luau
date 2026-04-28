@@ -503,6 +503,8 @@ CheckSolutionRemote.OnServerInvoke = function(player, input)
         if notificationSent then
             -- Suspicion follows the same server-side notification throttle path.
             SuspicionManager.Add(MISTAKE_SUSPICION, player)
+            local trapCause = result.popupThrottleKey or "ClickedPhish"
+            require(game.ServerScriptService.Server.DecisionTracker).LogDecision(player, trapCause, true)
         end
     end
 
@@ -515,6 +517,9 @@ CheckSolutionRemote.OnServerInvoke = function(player, input)
     then
         -- Only a verified Chapter 4 completion should finalize the timed run.
         _G.MissionTimer.completeMission(player)
+        local DecisionTracker = require(game.ServerScriptService.Server.DecisionTracker)
+        local finalStats = DecisionTracker.GetAllDecisions(player)
+        game.ReplicatedStorage.ShowMissionReview:FireClient(player, finalStats)
     end
 
     return result
