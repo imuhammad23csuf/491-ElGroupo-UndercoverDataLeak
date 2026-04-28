@@ -25,6 +25,14 @@ local rightOpenPivot = rightClosedPivot * CFrame.new(slideAmount, 0, 0)
 local isOpen = false
 local isAnimating = false
 
+local function reportDoorMissionProgress(player)
+	local missionController = _G.MissionController
+	local method = missionController and missionController.MarkSlidingDoorUnlocked
+	if typeof(method) == "function" then
+		task.defer(method, player)
+	end
+end
+
 -- Improved Animation Function
 local function animateDoors(shouldOpen)
 	isAnimating = true
@@ -57,12 +65,14 @@ end
 -- Detection Loop
 while task.wait(0.2) do
 	local playerNear = false
+	local openingPlayer = nil
 	for _, player in pairs(Players:GetPlayers()) do
 		local char = player.Character
 		if char and char:FindFirstChild("HumanoidRootPart") then
 			local distance = (char.HumanoidRootPart.Position - leftClosedPivot.Position).Magnitude
 			if distance <= openDistance and KeycardCopier.hasSlidingDoorAccess(player) then
 				playerNear = true
+				openingPlayer = player
 				break
 			end
 		end
@@ -70,6 +80,7 @@ while task.wait(0.2) do
 
 	if playerNear and not isOpen and not isAnimating then
 		isOpen = true
+		reportDoorMissionProgress(openingPlayer)
 		animateDoors(true)
 	elseif not playerNear and isOpen and not isAnimating then
 		isOpen = false

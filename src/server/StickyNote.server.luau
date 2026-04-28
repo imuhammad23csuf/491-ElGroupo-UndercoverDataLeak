@@ -4,6 +4,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local CyberScenarioManager = require(Shared:WaitForChild("CyberScenarioManager"))
+local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
 
 local NOTE_MODEL_NAME = "Sticky Note"
 local connected = {}
@@ -14,6 +15,14 @@ local function handleInspect(player)
     end
 
     player:SetAttribute("RecoveredAdminCredentials", true)
+    LessonManager.TriggerMistake(player, "StickyNotePassword", {
+        throttleKey = "sticky_note_password",
+        throttleWindow = 60,
+    })
+
+    if _G.MissionController and _G.MissionController.MarkStickyNoteFound then
+        _G.MissionController.MarkStickyNoteFound(player)
+    end
     CyberScenarioManager.CheckSolution(player, "world_sticky_note inspect")
     require(game.ServerScriptService.Server.DecisionTracker).LogDecision(player, "FoundStickyNotePassword", true)
 end

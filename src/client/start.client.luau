@@ -29,6 +29,10 @@ local SAVE_STATUS_REMOTE_NAME = "GetSavedProgressStatus"
 local CLEAR_SAVE_REMOTE_NAME = "ClearSavedProgress"
 local START_OVER_REMOTE_NAME = "StartOverProgress"
 local CLEANUP_REMOTE_NAME = "Cleanup"
+local NEWS_CUTSCENE_REMOTE_NAME = "StartNewsCutscene"
+local NEWS_CUTSCENE_STARTED_ATTRIBUTE = "NewsCutsceneStarted"
+local NEWS_CUTSCENE_COMPLETED_ATTRIBUTE = "NewsCutsceneCompleted"
+local NEWS_CUTSCENE_TIMEOUT = 75
 local DISCLAIMER_REMOTE_NAME = "DisclaimerCompleted"
 local DISCLAIMER_AUDIO_ID = "rbxassetid://104592562370100"
 local DISCLAIMER_AUDIO_FALLBACK_DURATION = 28
@@ -1330,11 +1334,62 @@ local function getDefaultStartScenarioId()
 	return SCENARIO_ORDER[1]
 end
 
+local missionStartInProgress = false
+local newsCutsceneRequestedThisSession = false
+
+local function playNewsCutsceneBeforeMission()
+	if newsCutsceneRequestedThisSession
+		or player:GetAttribute(NEWS_CUTSCENE_STARTED_ATTRIBUTE) == true
+		or player:GetAttribute(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE) == true then
+		return true
+	end
+
+	local event = ReplicatedStorage:FindFirstChild(NEWS_CUTSCENE_REMOTE_NAME)
+	if not event or not event:IsA("RemoteEvent") then
+		return true
+	end
+
+	newsCutsceneRequestedThisSession = true
+	player:SetAttribute(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE, false)
+
+	local completed = player:GetAttribute(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE) == true
+	local connection
+	connection = player:GetAttributeChangedSignal(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE):Connect(function()
+		if player:GetAttribute(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE) == true then
+			completed = true
+		end
+	end)
+
+	event:FireServer()
+
+	local startedAt = os.clock()
+	while not completed and os.clock() - startedAt < NEWS_CUTSCENE_TIMEOUT do
+		RunService.Heartbeat:Wait()
+	end
+
+	if connection then
+		connection:Disconnect()
+	end
+
+	if not completed then
+		warn("[ModernTitleScreen] News cutscene timed out; continuing mission start.")
+		player:SetAttribute(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE, true)
+	end
+
+	return true
+end
+
 local function startMissionFlow(scenarioId)
+	if missionStartInProgress then
+		return
+	end
+
+	missionStartInProgress = true
 	scenarioId = tostring(scenarioId or getDefaultStartScenarioId())
 	local loadScenarioRemote = getRemoteFunction(LOAD_SCENARIO_REMOTE_NAME)
 	if not loadScenarioRemote then
 		notify("UNDERCOVER", "Mission start is unavailable right now.", 3)
+		missionStartInProgress = false
 		return
 	end
 
@@ -1342,22 +1397,21 @@ local function startMissionFlow(scenarioId)
 	screenGui.Enabled = false
 	closePopup(true)
 
+	playNewsCutsceneBeforeMission()
+
 	local okLoad, result, err = pcall(function()
 		return loadScenarioRemote:InvokeServer(scenarioId)
 	end)
 	if not okLoad or type(result) ~= "table" then
 		screenGui.Enabled = true
 		notify("UNDERCOVER", tostring(err or "Could not start that chapter."), 3)
+		missionStartInProgress = false
 		return
 	end
 
 	player:SetAttribute(RESTORE_STATE_ATTRIBUTE, nil)
 	notify("UNDERCOVER", "Check your tablet for instructions.", 3)
-
-	local evt = ReplicatedStorage:FindFirstChild("StartNewsCutscene")
-	if evt then
-		evt:FireServer()
-	end
+	missionStartInProgress = false
 end
 
 startBtn.MouseButton1Click:Connect(function()

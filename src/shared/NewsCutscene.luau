@@ -6,6 +6,10 @@ local SoundService = game:GetService("SoundService")
 local ContentProvider = game:GetService("ContentProvider")
 
 local M = {}
+local MAIN_SOUNDTRACK_NAMES = {
+	BackgroundMusic = true,
+	GameMusic = true,
+}
 
 -- ================= helpers =================
 
@@ -15,13 +19,16 @@ local function tween(inst, info, props)
 	t.Completed:Wait()
 end
 
-local function findGameMusic()
+local function findGameMusicSounds()
+	local sounds = {}
+
 	for _, d in ipairs(SoundService:GetDescendants()) do
-		if d:IsA("Sound") and d.Name == "GameMusic" then
-			return d
+		if d:IsA("Sound") and MAIN_SOUNDTRACK_NAMES[d.Name] then
+			table.insert(sounds, d)
 		end
 	end
-	return nil
+
+	return sounds
 end
 
 local function createSound(id, volume, looped)
@@ -449,8 +456,13 @@ function M.Play(player, opts)
 	local headlines = opts.headlines or {}
 	if #headlines == 0 then return end
 
+	if player and player.GetAttribute and player:GetAttribute("NewsCutsceneCompleted") == true then
+		return
+	end
+
 	-- tell other scripts: cutscene not done yet
 	if player and player.SetAttribute then
+		player:SetAttribute("NewsCutsceneStarted", true)
 		player:SetAttribute("NewsCutsceneCompleted", false)
 	end
 
@@ -554,26 +566,26 @@ function M.Play(player, opts)
 		end
 	end
 
-	-- ===== audio crossfade: game -> news (and keep game paused until news fully ends)
-	local gameMusic = findGameMusic()
-	local gameWasPlaying, gamePrevVolume, gameTimePos = false, nil, 0
-	if gameMusic then
-		gameWasPlaying = gameMusic.IsPlaying
-		gamePrevVolume = gameMusic.Volume
-		gameTimePos = gameMusic.TimePosition
-		-- fade out quickly, then pause
-		local t0, dur = time(), 0.35
-		while time() - t0 < dur do
-			local a = (time() - t0)/dur
-			gameMusic.Volume = (gamePrevVolume or 0.6) * (1-a)
-			RunService.Heartbeat:Wait()
+	-- ===== audio handoff: stop game music before news, resume only after news ends
+	local gameMusicStates = {}
+	for _, gameMusic in ipairs(findGameMusicSounds()) do
+		gameMusicStates[#gameMusicStates + 1] = {
+			sound = gameMusic,
+			wasPlaying = gameMusic.IsPlaying,
+			volume = gameMusic.Volume,
+			timePosition = gameMusic.TimePosition,
+		}
+
+		gameMusic.Volume = 0
+		if gameMusic.IsPlaying then
+			gameMusic:Pause()
 		end
-		if gameWasPlaying then gameMusic:Pause() end
 	end
 
 	local news
 	if opts.musicId and opts.musicId ~= "" then
 		news = createSound(opts.musicId, 0.7, false)
+		news.Name = "NewsCutsceneMusic"
 		news:Play()
 	end
 
@@ -633,16 +645,24 @@ function M.Play(player, opts)
 	end
 
 	-- Only after news is fully stopped do we resume game music
-	if gameMusic and gameWasPlaying then
-		gameMusic.TimePosition = gameTimePos
-		gameMusic:Resume()
-		local t0, dur = time(), 0.45
-		while time() - t0 < dur do
-			local a = (time() - t0)/dur
-			gameMusic.Volume = (gamePrevVolume or 0.6) * a
-			RunService.Heartbeat:Wait()
+	for _, state in ipairs(gameMusicStates) do
+		local gameMusic = state.sound
+		if gameMusic and gameMusic.Parent then
+			gameMusic.Volume = 0
+			if state.wasPlaying then
+				gameMusic.TimePosition = state.timePosition or 0
+				gameMusic:Resume()
+			end
+
+			local t0, dur = time(), 0.45
+			while time() - t0 < dur do
+				local a = (time() - t0) / dur
+				gameMusic.Volume = (state.volume or 0.6) * a
+				RunService.Heartbeat:Wait()
+			end
+
+			gameMusic.Volume = state.volume or 0.6
 		end
-		gameMusic.Volume = gamePrevVolume or 0.6
 	end
 
 	-- make the News model invisible & non-collidable so players can walk through

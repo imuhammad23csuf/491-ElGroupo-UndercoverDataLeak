@@ -79,8 +79,7 @@ local function queueSuspicion(player, amount)
         return
     end
 
-    local uid = player.UserId
-    pendingSuspicion[uid] = (pendingSuspicion[uid] or 0) + (amount or 0)
+    SuspicionManager.Add(amount or 0, player)
 end
 
 local function flushSuspicion(player)

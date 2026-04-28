@@ -518,6 +518,10 @@ local function handleMailTriageStep(player, session, scenario, step, rawInput)
     if not stepState.penalized[penaltyKey] then
         stepState.penalized[penaltyKey] = true
         local mistakePopup = buildMistakePopup(step)
+        local lessonId = nil
+        if expectedAction == "report" and action == "pass" then
+            lessonId = "ClickedPhish"
+        end
 
         return {
             success = false,
@@ -530,6 +534,7 @@ local function handleMailTriageStep(player, session, scenario, step, rawInput)
             popupMessage = mistakePopup.message,
             popupThrottleKey = mistakePopup.throttleKey .. "_mail_" .. penaltyKey,
             popupThrottleWindow = mistakePopup.throttleWindow,
+            lessonId = lessonId,
         }
     end
 

@@ -412,6 +412,9 @@ local function resetRuntimeState(player)
     end
 
     CyberScenarioManager.ResetProgress(player)
+    if _G.MissionController and _G.MissionController.ResetMission then
+        _G.MissionController.ResetMission(player)
+    end
 end
 
 local function getMissionTimer()
@@ -493,7 +496,16 @@ CheckSolutionRemote.OnServerInvoke = function(player, input)
 
     local result = CyberScenarioManager.CheckSolution(player, safeInput)
 
-    if type(result) == "table" and result.popupTitle and result.popupMessage then
+    if type(result) == "table" and result.lessonId then
+        local popupSent = LessonManager.TriggerMistake(player, result.lessonId, {
+            throttleKey = result.popupThrottleKey or result.lessonId,
+            throttleWindow = result.popupThrottleWindow or 2,
+        })
+
+        if popupSent then
+            SuspicionManager.Add(MISTAKE_SUSPICION, player)
+        end
+    elseif type(result) == "table" and result.popupTitle and result.popupMessage then
         local notificationSent = LessonManager.TriggerNotification(player, result.popupTitle, result.popupMessage, {
             throttleKey = result.popupThrottleKey,
             throttleWindow = result.popupThrottleWindow,

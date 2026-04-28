@@ -11,6 +11,13 @@ if not StartEvent then
 	StartEvent.Parent = ReplicatedStorage
 end
 
+local CompleteEvent = ReplicatedStorage:FindFirstChild("NewsCutsceneFinished")
+if not CompleteEvent then
+	CompleteEvent = Instance.new("RemoteEvent")
+	CompleteEvent.Name = "NewsCutsceneFinished"
+	CompleteEvent.Parent = ReplicatedStorage
+end
+
 -- Headlines (~60 seconds)
 local HEADLINES = {
 	{ text = "Good evening. We're coming to you with disturbing reports about the popular gaming platform Bloxplay.", duration = 4 },
@@ -22,6 +29,8 @@ local HEADLINES = {
 }
 
 local NEWS_MUSIC_ID = "rbxassetid://137057705955446"
+local STARTED_ATTRIBUTE = "NewsCutsceneStarted"
+local COMPLETED_ATTRIBUTE = "NewsCutsceneCompleted"
 
 -- Helper to get position from part/model
 local function getPos(inst)
@@ -64,6 +73,13 @@ end
 
 -- 🔥 START CUTSCENE AUTOMATICALLY
 local function startCutscene(player)
+	if player:GetAttribute(STARTED_ATTRIBUTE) == true or player:GetAttribute(COMPLETED_ATTRIBUTE) == true then
+		return
+	end
+
+	player:SetAttribute(STARTED_ATTRIBUTE, true)
+	player:SetAttribute(COMPLETED_ATTRIBUTE, false)
+
 	StartEvent:FireClient(player, {
 		headlines         = HEADLINES,
 		totalTime         = 60,
@@ -75,11 +91,26 @@ local function startCutscene(player)
 	})
 end
 
-Players.PlayerAdded:Connect(function(player)
+StartEvent.OnServerEvent:Connect(function(player)
+	if not player or player.Parent ~= Players then
+		return
+	end
+
 	task.defer(faceRigTowardCamera)
-
-	-- small delay so everything loads
-	task.wait(2)
-
 	startCutscene(player)
+end)
+
+CompleteEvent.OnServerEvent:Connect(function(player)
+	if not player or player.Parent ~= Players then
+		return
+	end
+	if player:GetAttribute(STARTED_ATTRIBUTE) ~= true then
+		return
+	end
+
+	player:SetAttribute(COMPLETED_ATTRIBUTE, true)
+end)
+
+Players.PlayerAdded:Connect(function()
+	task.defer(faceRigTowardCamera)
 end)
