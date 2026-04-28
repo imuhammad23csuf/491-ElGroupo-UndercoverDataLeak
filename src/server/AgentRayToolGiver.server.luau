@@ -11,6 +11,8 @@ local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
 local AGENT_NAMES = {
 	["Agent Ray"] = true,
 	AgentRay = true,
+	["Special Agent Ray"] = true,
+	SpecialAgentRay = true,
 }
 
 local TOOL_NAMES = {
@@ -18,6 +20,7 @@ local TOOL_NAMES = {
 	"GhostKey",
 }
 
+local DIALOGUE_REMOTE_NAME = "AgentRayDialogueEvent"
 local TOOL_NAME_SET = {}
 for _, toolName in ipairs(TOOL_NAMES) do
 	TOOL_NAME_SET[toolName] = true
@@ -53,6 +56,14 @@ local playerConnections = {}
 local attachedAgents = {}
 local connectedPrompts = {}
 local pendingGrantTokensByUserId = {}
+local pendingGrantPromptsByUserId = {}
+
+local dialogueRemote = ReplicatedStorage:FindFirstChild(DIALOGUE_REMOTE_NAME)
+if not dialogueRemote then
+	dialogueRemote = Instance.new("RemoteEvent")
+	dialogueRemote.Name = DIALOGUE_REMOTE_NAME
+	dialogueRemote.Parent = ReplicatedStorage
+end
 
 local function isToolName(name)
 	return TOOL_NAME_SET[tostring(name or "")] == true
@@ -194,6 +205,9 @@ local function handleAgentVisit(player)
 	end
 
 	pendingGrantTokensByUserId[player.UserId] = nil
+	pendingGrantPromptsByUserId[player.UserId] = nil
+	player:SetAttribute("AgentRayDialogueActive", false)
+	player:SetAttribute("AgentRayDialogueComplete", true)
 	markAgentRayVisited(player)
 
 	for _, toolName in ipairs(TOOL_NAMES) do
@@ -219,6 +233,23 @@ local function getAgentDialogueDelay()
 	end
 
 	return math.clamp(lineCount * FALLBACK_DIALOGUE_SECONDS_PER_LINE, FALLBACK_DIALOGUE_MIN_SECONDS, FALLBACK_DIALOGUE_MAX_SECONDS)
+end
+
+local function getAgentDialogueLines()
+	local lines = NPCdata["Agent Ray"] or NPCdata.AgentRay
+	if type(lines) ~= "table" or #lines == 0 then
+		return {
+			"I am Special Agent Ray. I have your tools ready.",
+			"Use them carefully. The operation depends on discretion.",
+		}
+	end
+
+	local copy = table.create(#lines)
+	for index, line in ipairs(lines) do
+		copy[index] = tostring(line)
+	end
+
+	return copy
 end
 
 local function hasDialogueCompleteAttribute(player)
@@ -274,6 +305,51 @@ local function waitForAgentDialogueToFinish(player, prompt, token)
 	end
 end
 
+local function getPromptPart(prompt)
+	local parent = prompt and prompt.Parent
+	if parent and parent:IsA("BasePart") then
+		return parent
+	end
+	if parent and parent:IsA("Attachment") and parent.Parent and parent.Parent:IsA("BasePart") then
+		return parent.Parent
+	end
+
+	return nil
+end
+
+local function isPlayerNearPrompt(player, prompt)
+	local part = getPromptPart(prompt)
+	local character = player and player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not part or not root then
+		return false
+	end
+
+	local maxDistance = tonumber(prompt.MaxActivationDistance) or 12
+	return (root.Position - part.Position).Magnitude <= maxDistance + 6
+end
+
+local function completeAgentDialogue(player, token)
+	if not player or player.Parent ~= Players then
+		return
+	end
+
+	local userId = player.UserId
+	if pendingGrantTokensByUserId[userId] ~= token then
+		return
+	end
+
+	local prompt = pendingGrantPromptsByUserId[userId]
+	if prompt and prompt.Parent and not isPlayerNearPrompt(player, prompt) then
+		player:SetAttribute("AgentRayDialogueActive", false)
+		pendingGrantTokensByUserId[userId] = nil
+		pendingGrantPromptsByUserId[userId] = nil
+		return
+	end
+
+	handleAgentVisit(player)
+end
+
 local function scheduleAgentVisitAfterDialogue(player, prompt)
 	if not player or player.Parent ~= Players then
 		return
@@ -288,9 +364,24 @@ local function scheduleAgentVisitAfterDialogue(player, prompt)
 		return
 	end
 
-	local token = os.clock()
+	local token = ("%d:%.3f"):format(player.UserId, os.clock())
 	pendingGrantTokensByUserId[player.UserId] = token
+	pendingGrantPromptsByUserId[player.UserId] = prompt
+	player:SetAttribute("AgentRayDialogueComplete", false)
+	player:SetAttribute("AgentRayDialogueActive", true)
 
+	dialogueRemote:FireClient(player, "Start", token, getAgentDialogueLines())
+
+	task.delay(getAgentDialogueDelay() + 8, function()
+		if pendingGrantTokensByUserId[player.UserId] == token then
+			player:SetAttribute("AgentRayDialogueActive", false)
+			pendingGrantTokensByUserId[player.UserId] = nil
+			pendingGrantPromptsByUserId[player.UserId] = nil
+		end
+	end)
+
+	-- Compatibility with any pre-existing Agent Ray dialogue script that marks
+	-- the same player attributes on the server.
 	task.spawn(function()
 		waitForAgentDialogueToFinish(player, prompt, token)
 
@@ -298,9 +389,21 @@ local function scheduleAgentVisitAfterDialogue(player, prompt)
 			return
 		end
 
-		handleAgentVisit(player)
+		if hasDialogueCompleteAttribute(player) then
+			handleAgentVisit(player)
+		end
 	end)
 end
+
+dialogueRemote.OnServerEvent:Connect(function(player, action, token)
+	if action == "Complete" then
+		completeAgentDialogue(player, token)
+	elseif action == "Cancel" and pendingGrantTokensByUserId[player.UserId] == token then
+		pendingGrantTokensByUserId[player.UserId] = nil
+		pendingGrantPromptsByUserId[player.UserId] = nil
+		player:SetAttribute("AgentRayDialogueActive", false)
+	end
+end)
 
 local function getAttachPart(instance)
 	if not instance then
@@ -418,6 +521,8 @@ local function disconnectPlayer(player)
 	end
 
 	playerConnections[player.UserId] = nil
+	pendingGrantTokensByUserId[player.UserId] = nil
+	pendingGrantPromptsByUserId[player.UserId] = nil
 end
 
 for _, descendant in ipairs(Workspace:GetDescendants()) do

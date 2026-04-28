@@ -18,6 +18,7 @@ local popupEvent = ensureRemote("ShowEducationalPopup")
 local notificationEvent = ensureRemote("ShowEducationalNotification")
 
 local lessonDatabase = {
+<<<<<<< Updated upstream
 	ClickedPhish = {
 		title = "PHISHING DETECTED",
 		message = "Always check the sender's email domain before clicking links. Hackers use urgent language to trick you into acting quickly.",
@@ -34,6 +35,40 @@ local lessonDatabase = {
 		title = "SPOTTED BY CAMERA",
 		message = "Cameras leave a permanent digital audit trail. As a cybersecurity professional, you must minimize your digital footprint.",
 	},
+=======
+    ClickedPhish = {
+        title = "PHISHING DETECTED",
+        message = "Always check the sender's email domain before clicking links. Hackers use urgent language to trick you into acting quickly.",
+    },
+    FoundStickyNotePassword = {
+        title = "CREDENTIAL EXPOSURE",
+        message = "Never write passwords on sticky notes attached to your monitor. Physical security is just as important as digital security!",
+    },
+    StickyNotePassword = {
+        title = "CREDENTIAL EXPOSURE",
+        message = "Never write passwords on sticky notes attached to your monitor. Physical security is just as important as digital security!",
+    },
+    PublicWifiOpsec = {
+        title = "OPSEC WARNING",
+        message = "Handling sensitive corporate tools in a public coffee shop exposes you to shoulder surfing and unsecured network snooping.",
+    },
+    CaughtByCamera = {
+        title = "SPOTTED BY CAMERA",
+        message = "Cameras leave a permanent digital audit trail. As a cybersecurity professional, you must minimize your digital footprint.",
+    },
+    CameraDetected = {
+        title = "SPOTTED BY CAMERA",
+        message = "Cameras leave a permanent digital audit trail. As a cybersecurity professional, you must minimize your digital footprint.",
+    },
+    DetectedBySecurity = {
+        title = "SECURITY TRIGGERED",
+        message = "You were spotted! Physical security personnel are your biggest threat during an on-site infiltration.",
+    },
+    ClonedKeycard = {
+        title = "RFID CLONED",
+        message = "You successfully cloned a badge. In the real world, unprotected RFID cards can be copied just by standing near someone.",
+    }
+>>>>>>> Stashed changes
 }
 
 local function shouldThrottlePopup(player, throttleKey, throttleWindow)
