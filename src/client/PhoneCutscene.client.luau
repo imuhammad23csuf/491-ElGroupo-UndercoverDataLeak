@@ -2,6 +2,7 @@
 
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
@@ -15,6 +16,7 @@ local Camera = Workspace.CurrentCamera
 
 local TypingSpeed = 0.018
 local FadeUI = 0.2
+local PHONE_CALL_REMOTE_NAME = "PhoneCallRequested"
 local AdvanceKeys = { Enum.KeyCode.E, Enum.KeyCode.Space, Enum.KeyCode.Return, Enum.KeyCode.ButtonA }
 
 local NewsReady = false
@@ -455,14 +457,20 @@ local RingMessages = {
 	"Incoming call from a restricted line.",
 }
 
-local function waitForPhone()
-	local direct = Workspace:FindFirstChild("Phone") or Workspace:WaitForChild("Phone", 15)
-	if direct then
+local function isPhoneInstance(instance)
+	return instance
+		and instance.Name == "Phone"
+		and (instance:IsA("Model") or instance:IsA("BasePart"))
+end
+
+local function findPhone()
+	local direct = Workspace:FindFirstChild("Phone")
+	if isPhoneInstance(direct) then
 		return direct
 	end
 
 	for _, descendant in ipairs(Workspace:GetDescendants()) do
-		if descendant:IsA("Model") and descendant.Name == "Phone" then
+		if isPhoneInstance(descendant) then
 			return descendant
 		end
 	end
@@ -470,12 +478,21 @@ local function waitForPhone()
 	return nil
 end
 
-PhoneModel = waitForPhone()
+local function waitForPhone()
+	local phone = findPhone()
+	if phone then
+		return phone
+	end
 
-if not PhoneModel then
-	warn("Phone model not found in Workspace.")
-	return
+	while true do
+		local descendant = Workspace.DescendantAdded:Wait()
+		if isPhoneInstance(descendant) then
+			return descendant
+		end
+	end
 end
+
+PhoneModel = waitForPhone()
 
 local function ensureClickDetectors(model)
 	for _, descendant in ipairs(model:GetDescendants()) do
@@ -871,6 +888,32 @@ end
 local Debounce = false
 local connectedDetectors = {}
 
+local function requestPhoneCall()
+	if Debounce or InCall or not hasNewsFinished() then
+		return
+	end
+
+	Debounce = true
+	runCall(Conversation, "UNKNOWN CALLER")
+	Debounce = false
+end
+
+local phoneRemoteConnection = nil
+local function bindPhoneCallRemote(remote)
+	if phoneRemoteConnection or not remote or not remote:IsA("RemoteEvent") then
+		return
+	end
+
+	phoneRemoteConnection = remote.OnClientEvent:Connect(requestPhoneCall)
+end
+
+bindPhoneCallRemote(ReplicatedStorage:FindFirstChild(PHONE_CALL_REMOTE_NAME))
+ReplicatedStorage.ChildAdded:Connect(function(child)
+	if child.Name == PHONE_CALL_REMOTE_NAME then
+		bindPhoneCallRemote(child)
+	end
+end)
+
 local function connectDetector(clickDetector)
 	if connectedDetectors[clickDetector] then
 		return
@@ -878,13 +921,11 @@ local function connectDetector(clickDetector)
 
 	connectedDetectors[clickDetector] = true
 	clickDetector.MouseClick:Connect(function(player)
-		if player ~= Player or Debounce or InCall or not hasNewsFinished() then
+		if player ~= Player then
 			return
 		end
 
-		Debounce = true
-		runCall(Conversation, "UNKNOWN CALLER")
-		Debounce = false
+		requestPhoneCall()
 	end)
 end
 
