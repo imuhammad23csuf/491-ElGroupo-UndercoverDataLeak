@@ -2,26 +2,20 @@
 
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ContextActionService = game:GetService("ContextActionService")
-local UserInputService = game:GetService("UserInputService")
 
 local Player = Players.LocalPlayer
 local PlayerName = Player.Name
 local PlayerGui = Player:WaitForChild("PlayerGui")
-local Mouse = Player:GetMouse()
 local Character = Player.Character or Player.CharacterAdded:Wait()
 local Humanoid = Character:WaitForChild("Humanoid")
 local Camera = Workspace.CurrentCamera
-local PhoneCallRequested = ReplicatedStorage:WaitForChild("PhoneCallRequested", 20)
 
 local TypingSpeed = 0.018
 local FadeUI = 0.2
 local AdvanceKeys = { Enum.KeyCode.E, Enum.KeyCode.Space, Enum.KeyCode.Return, Enum.KeyCode.ButtonA }
-local PHONE_CUTSCENE_STARTED_ATTRIBUTE = "PhoneCutsceneStarted"
-local PHONE_CUTSCENE_COMPLETED_ATTRIBUTE = "PhoneCutsceneCompleted"
 
 local NewsReady = false
 local maybeStartRinging
@@ -43,11 +37,6 @@ local function hasNewsFinished()
 	return NewsReady
 end
 
-local function hasPhoneCutsceneStarted()
-	return Player:GetAttribute(PHONE_CUTSCENE_STARTED_ATTRIBUTE) == true
-		or Player:GetAttribute(PHONE_CUTSCENE_COMPLETED_ATTRIBUTE) == true
-end
-
 local SpawnCF
 local function captureSpawnCF(char)
 	local hrp = char:WaitForChild("HumanoidRootPart", 5)
@@ -67,8 +56,7 @@ end)
 local Conversation = {
 	{ speaker = "Unknown Caller", text = "Hello. Am I speaking with " .. PlayerName .. "?" },
 	{ speaker = PlayerName, text = "This is " .. PlayerName .. ". Identify yourself." },
-	{ speaker = "Special Agent Ray", text = "This is Special Agent Ray. I am coordinating a federal inquiry into Bloxplay." },
-	{ speaker = "Special Agent Ray", text = "The matter involves internal policy violations and possible exposure of sensitive material." },
+	{ speaker = "Special Agent Ray", text = "This is Special Agent Ray. I am coordinating a federal inquiry into Bloxplay involving internal policy violations and possible exposure of sensitive material." },
 	{ speaker = PlayerName, text = "Understood. What is my objective?" },
 	{ speaker = "Special Agent Ray", text = "Meet me at the Cafe to get these tools. Once you have them, investigate discreetly and document any evidence you find." },
 	{ speaker = "Special Agent Ray", text = "If security identifies you, the operation is compromised. Keep a low profile and move deliberately." },
@@ -467,9 +455,9 @@ local RingMessages = {
 	"Incoming call from a restricted line.",
 }
 
-local function findPhone()
-	local direct = Workspace:FindFirstChild("Phone")
-	if direct and (direct:IsA("Model") or direct:IsA("BasePart")) then
+local function waitForPhone()
+	local direct = Workspace:FindFirstChild("Phone") or Workspace:WaitForChild("Phone", 15)
+	if direct then
 		return direct
 	end
 
@@ -479,42 +467,17 @@ local function findPhone()
 		end
 	end
 
-	for _, descendant in ipairs(Workspace:GetDescendants()) do
-		if descendant:IsA("BasePart") and descendant.Name == "Phone" then
-			return descendant
-		end
-	end
-
 	return nil
-end
-
-local function waitForPhone()
-	local phone = findPhone()
-	while not phone do
-		local added = Workspace.DescendantAdded:Wait()
-		if added.Name == "Phone" and (added:IsA("Model") or added:IsA("BasePart")) then
-			phone = added
-		else
-			phone = findPhone()
-		end
-	end
-
-	return phone
 end
 
 PhoneModel = waitForPhone()
 
-local function ensureClickDetectors(model)
-	if model:IsA("BasePart") then
-		local clickDetector = model:FindFirstChildOfClass("ClickDetector")
-		if not clickDetector then
-			clickDetector = Instance.new("ClickDetector")
-			clickDetector.Parent = model
-		end
-		clickDetector.MaxActivationDistance = 24
-		return
-	end
+if not PhoneModel then
+	warn("Phone model not found in Workspace.")
+	return
+end
 
+local function ensureClickDetectors(model)
 	for _, descendant in ipairs(model:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			local clickDetector = descendant:FindFirstChildOfClass("ClickDetector")
@@ -685,7 +648,7 @@ local function startPhoneAnimation()
 end
 
 local function startRinging()
-	if Ringing or not hasNewsFinished() or hasPhoneCutsceneStarted() then
+	if Ringing or not hasNewsFinished() then
 		return
 	end
 
@@ -834,12 +797,11 @@ local function startCallAnimation()
 end
 
 local function runCall(lines, callerName)
-	if InCall or not hasNewsFinished() or hasPhoneCutsceneStarted() then
+	if InCall or not hasNewsFinished() then
 		return
 	end
 
 	InCall = true
-	Player:SetAttribute(PHONE_CUTSCENE_STARTED_ATTRIBUTE, true)
 
 	local hrp = Character:FindFirstChild("HumanoidRootPart")
 	if hrp and SpawnCF then
@@ -903,39 +865,11 @@ local function runCall(lines, callerName)
 	stopCallAnimation()
 	UI.Hide()
 
-	Player:SetAttribute(PHONE_CUTSCENE_COMPLETED_ATTRIBUTE, true)
 	InCall = false
 end
 
 local Debounce = false
 local connectedDetectors = {}
-
-local function isPhoneTarget(instance)
-	return instance ~= nil and (instance == PhoneModel or instance:IsDescendantOf(PhoneModel))
-end
-
-local function canReachPhoneTarget(instance)
-	local root = Character and Character:FindFirstChild("HumanoidRootPart")
-	if not root or not instance or not instance:IsA("BasePart") then
-		return false
-	end
-
-	return (root.Position - instance.Position).Magnitude <= 24
-end
-
-local function tryStartPhoneCall()
-	if Debounce or InCall or not hasNewsFinished() or hasPhoneCutsceneStarted() then
-		return
-	end
-
-	Debounce = true
-	runCall(Conversation, "UNKNOWN CALLER")
-	Debounce = false
-end
-
-if PhoneCallRequested and PhoneCallRequested:IsA("RemoteEvent") then
-	PhoneCallRequested.OnClientEvent:Connect(tryStartPhoneCall)
-end
 
 local function connectDetector(clickDetector)
 	if connectedDetectors[clickDetector] then
@@ -944,34 +878,21 @@ local function connectDetector(clickDetector)
 
 	connectedDetectors[clickDetector] = true
 	clickDetector.MouseClick:Connect(function(player)
-		if player and player ~= Player then
+		if player ~= Player or Debounce or InCall or not hasNewsFinished() then
 			return
 		end
 
-		tryStartPhoneCall()
+		Debounce = true
+		runCall(Conversation, "UNKNOWN CALLER")
+		Debounce = false
 	end)
 end
 
-local function connectPhoneDetectors()
-	ensureClickDetectors(PhoneModel)
-
-	if PhoneModel:IsA("BasePart") then
-		local clickDetector = PhoneModel:FindFirstChildOfClass("ClickDetector")
-		if clickDetector then
-			connectDetector(clickDetector)
-		end
-		return
-	end
-
-	for _, descendant in ipairs(PhoneModel:GetDescendants()) do
-		if descendant:IsA("ClickDetector") then
-			descendant.MaxActivationDistance = 24
-			connectDetector(descendant)
-		end
+for _, descendant in ipairs(PhoneModel:GetDescendants()) do
+	if descendant:IsA("ClickDetector") then
+		connectDetector(descendant)
 	end
 end
-
-connectPhoneDetectors()
 
 PhoneModel.DescendantAdded:Connect(function(instance)
 	if instance:IsA("BasePart") then
@@ -987,30 +908,4 @@ PhoneModel.DescendantAdded:Connect(function(instance)
 		instance.MaxActivationDistance = 24
 		connectDetector(instance)
 	end
-end)
-
-task.spawn(function()
-	while PhoneModel and PhoneModel.Parent do
-		connectPhoneDetectors()
-		task.wait(1)
-	end
-end)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return
-	end
-
-	local isPrimaryClick = input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch
-	if not isPrimaryClick then
-		return
-	end
-
-	local target = Mouse.Target
-	if not isPhoneTarget(target) or not canReachPhoneTarget(target) then
-		return
-	end
-
-	tryStartPhoneCall()
 end)
