@@ -32,6 +32,9 @@ local FALLBACK_DIALOGUE_SECONDS_PER_LINE = 3.1
 local FALLBACK_DIALOGUE_MIN_SECONDS = 10
 local FALLBACK_DIALOGUE_MAX_SECONDS = 28
 local DIALOGUE_FINISH_POLL_INTERVAL = 0.15
+local PENDING_DIALOGUE_TOOL_CHECK_DELAY = 1.25
+local GRANT_HANDOFF_GRACE_SECONDS = 6
+local OPSEC_POPUP_DELAY_SECONDS = 0.35
 
 local DIALOGUE_COMPLETE_ATTRIBUTES = {
 	"AgentRayDialogueComplete",
@@ -56,6 +59,7 @@ local playerConnections = {}
 local attachedAgents = {}
 local connectedPrompts = {}
 local pendingGrantTokensByUserId = {}
+<<<<<<< Updated upstream
 local pendingGrantPromptsByUserId = {}
 
 local dialogueRemote = ReplicatedStorage:FindFirstChild(DIALOGUE_REMOTE_NAME)
@@ -64,6 +68,10 @@ if not dialogueRemote then
 	dialogueRemote.Name = DIALOGUE_REMOTE_NAME
 	dialogueRemote.Parent = ReplicatedStorage
 end
+=======
+local delayedPendingToolChecksByUserId = {}
+local grantHandoffUntilByUserId = {}
+>>>>>>> Stashed changes
 
 local function isToolName(name)
 	return TOOL_NAME_SET[tostring(name or "")] == true
@@ -156,8 +164,59 @@ local function removeAgentTools(player)
 	removeToolsFrom(player:FindFirstChild("StarterGear"))
 end
 
+local function isAgentRayToolAllowed(player)
+	if not player then
+		return false
+	end
+
+	if player:GetAttribute("HasSpokenToAgentRay") == true then
+		return true
+	end
+
+	local handoffUntil = grantHandoffUntilByUserId[player.UserId]
+	return handoffUntil ~= nil and os.clock() <= handoffUntil
+end
+
+local function openGrantHandoffWindow(player, seconds)
+	if not player then
+		return
+	end
+
+	grantHandoffUntilByUserId[player.UserId] = math.max(
+		grantHandoffUntilByUserId[player.UserId] or 0,
+		os.clock() + (seconds or GRANT_HANDOFF_GRACE_SECONDS)
+	)
+end
+
+local function schedulePendingToolCheck(player)
+	if not player then
+		return
+	end
+
+	local userId = player.UserId
+	if delayedPendingToolChecksByUserId[userId] then
+		return
+	end
+
+	delayedPendingToolChecksByUserId[userId] = true
+	task.delay(PENDING_DIALOGUE_TOOL_CHECK_DELAY, function()
+		delayedPendingToolChecksByUserId[userId] = nil
+
+		if player.Parent ~= Players or isAgentRayToolAllowed(player) then
+			return
+		end
+
+		removeAgentTools(player)
+	end)
+end
+
 local function enforceNoToolsBeforeVisit(player)
-	if not player or player:GetAttribute("HasSpokenToAgentRay") == true then
+	if not player or isAgentRayToolAllowed(player) then
+		return
+	end
+
+	if pendingGrantTokensByUserId[player.UserId] then
+		schedulePendingToolCheck(player)
 		return
 	end
 
@@ -205,19 +264,30 @@ local function handleAgentVisit(player)
 	end
 
 	pendingGrantTokensByUserId[player.UserId] = nil
+<<<<<<< Updated upstream
 	pendingGrantPromptsByUserId[player.UserId] = nil
 	player:SetAttribute("AgentRayDialogueActive", false)
 	player:SetAttribute("AgentRayDialogueComplete", true)
+=======
+	delayedPendingToolChecksByUserId[player.UserId] = nil
+	openGrantHandoffWindow(player)
+>>>>>>> Stashed changes
 	markAgentRayVisited(player)
 
 	for _, toolName in ipairs(TOOL_NAMES) do
 		grantTool(player, toolName)
 	end
 
-	LessonManager.TriggerMistake(player, "PublicWifiOpsec", {
-		throttleKey = "agent_ray_cafe_tools",
-		throttleWindow = 60,
-	})
+	task.delay(OPSEC_POPUP_DELAY_SECONDS, function()
+		if player.Parent ~= Players or player:GetAttribute("HasSpokenToAgentRay") ~= true then
+			return
+		end
+
+		LessonManager.TriggerMistake(player, "PublicWifiOpsec", {
+			throttleKey = "agent_ray_cafe_tools",
+			throttleWindow = 60,
+		})
+	end)
 end
 
 _G.AgentRayToolGiver = {
@@ -492,6 +562,9 @@ local function connectPlayer(player)
 
 	table.insert(playerConnections[player.UserId], player:GetAttributeChangedSignal("HasSpokenToAgentRay"):Connect(function()
 		if player:GetAttribute("HasSpokenToAgentRay") ~= true then
+			pendingGrantTokensByUserId[player.UserId] = nil
+			delayedPendingToolChecksByUserId[player.UserId] = nil
+			grantHandoffUntilByUserId[player.UserId] = nil
 			removeAgentTools(player)
 		end
 	end))
@@ -522,7 +595,12 @@ local function disconnectPlayer(player)
 
 	playerConnections[player.UserId] = nil
 	pendingGrantTokensByUserId[player.UserId] = nil
+<<<<<<< Updated upstream
 	pendingGrantPromptsByUserId[player.UserId] = nil
+=======
+	delayedPendingToolChecksByUserId[player.UserId] = nil
+	grantHandoffUntilByUserId[player.UserId] = nil
+>>>>>>> Stashed changes
 end
 
 for _, descendant in ipairs(Workspace:GetDescendants()) do
