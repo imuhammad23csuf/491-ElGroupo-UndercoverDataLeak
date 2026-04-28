@@ -193,17 +193,28 @@ local function handleAgentVisit(player)
 		return
 	end
 
+	local alreadyVisited = player:GetAttribute("HasSpokenToAgentRay") == true
 	pendingGrantTokensByUserId[player.UserId] = nil
-	markAgentRayVisited(player)
+	if not alreadyVisited then
+		markAgentRayVisited(player)
+	end
 
 	for _, toolName in ipairs(TOOL_NAMES) do
 		grantTool(player, toolName)
 	end
 
-	LessonManager.TriggerMistake(player, "PublicWifiOpsec", {
-		throttleKey = "agent_ray_cafe_tools",
-		throttleWindow = 60,
-	})
+	if not alreadyVisited then
+		task.delay(0.25, function()
+			if player.Parent ~= Players or player:GetAttribute("HasSpokenToAgentRay") ~= true then
+				return
+			end
+
+			LessonManager.TriggerMistake(player, "PublicWifiOpsec", {
+				throttleKey = "agent_ray_cafe_tools",
+				throttleWindow = 60,
+			})
+		end)
+	end
 end
 
 _G.AgentRayToolGiver = {
@@ -379,6 +390,16 @@ local function watchPlayerContainer(player, container)
 
 	table.insert(playerConnections[player.UserId], container.ChildAdded:Connect(function(child)
 		if child:IsA("Tool") and isToolName(child.Name) then
+			if player:GetAttribute("HasSpokenToAgentRay") == true then
+				task.defer(dedupePlayerTool, player, child.Name)
+				return
+			end
+
+			if pendingGrantTokensByUserId[player.UserId] then
+				task.defer(handleAgentVisit, player)
+				return
+			end
+
 			task.defer(enforceNoToolsBeforeVisit, player)
 		end
 	end))
