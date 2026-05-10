@@ -9,6 +9,16 @@ end
 
 return function()
 	describe("NarrativeManager", function()
+		-- IntegrityService and dialogue sessions persist at module scope; reset between examples so
+		-- integrity deltas match DialogueData (e.g. Intro choice 1 is +10 once), not accumulated reruns.
+		beforeEach(function()
+			for _, userId in ipairs({ 101, 102, 103, 104 }) do
+				local p = makeFakePlayer(userId)
+				IntegrityService.resetIntegrity(p)
+				NarrativeManager.endDialogue(p)
+			end
+		end)
+
 		it("starts a dialogue successfully", function()
 			local player = makeFakePlayer(101)
 
