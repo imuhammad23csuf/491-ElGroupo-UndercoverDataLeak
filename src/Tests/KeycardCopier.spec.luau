@@ -1,5 +1,3 @@
-local KeycardCopier = require(game.ServerScriptService.Server.KeycardCopier)
-
 local function makeFakePlayer(userId)
 	return {
 		UserId = userId,
@@ -18,8 +16,20 @@ local function makeOwnedTool(ownerUserId)
 	return tool
 end
 
+local function loadKeyCardCopier()
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local shared = ReplicatedStorage:WaitForChild("Shared")
+	return require(shared:WaitForChild("KeycardCopier"))
+end
+
 return function()
 	describe("KeycardCopier", function()
+		local KeycardCopier
+
+		beforeEach(function()
+			KeycardCopier = loadKeyCardCopier()
+		end)
+
 		it("allows unlock when the player owns the keycard", function()
 			local player = makeFakePlayer(12345)
 			local tool = makeOwnedTool(12345)
