@@ -7,9 +7,8 @@ local SuspicionManager = require(sharedRoot:WaitForChild("SuspicionManager"))
 local LessonManager = require(script.Parent:WaitForChild("LessonManager"))
 
 local UPDATE_RATE = 0.03
-local PUSH_INTERVAL = 0.5
 local SUSPICION_TICK_RATE = 0.35
-local SUSPICION_PER_TICK = 1.2
+local SUSPICION_PER_TICK = 0.9
 
 local JAM_STATE_ATTRIBUTE = "CameraNetworkJamUntil"
 
@@ -23,7 +22,6 @@ local QUESTION_THRESHOLD = 50
 local EXCLAMATION_THRESHOLD = 100
 local CAMERA_LESSON_THROTTLE_SECONDS = 60
 
-local pendingSuspicion = {}
 local localSuspicionCache = {}
 
 local function isJamActive()
@@ -31,7 +29,7 @@ local function isJamActive()
     return typeof(jamUntil) == "number" and jamUntil > Workspace:GetServerTimeNow()
 end
 
-local function addPendingSuspicion(player, amount)
+local function addLineOfSightSuspicion(player, amount)
     if not player then
         return
     end
@@ -40,7 +38,7 @@ local function addPendingSuspicion(player, amount)
 
     local userId = player.UserId
     pcall(function()
-        SuspicionManager.Add(amount, player)
+        SuspicionManager.AddLineOfSight(amount, player)
     end)
 
     local localValue = localSuspicionCache[userId] or 0
@@ -53,22 +51,6 @@ local function triggerCameraLesson(player)
         throttleWindow = CAMERA_LESSON_THROTTLE_SECONDS,
     })
 end
-
-task.spawn(function()
-    while task.wait(PUSH_INTERVAL) do
-        for userId, amount in pairs(pendingSuspicion) do
-            if amount and amount > 0 then
-                local player = Players:GetPlayerByUserId(userId)
-                if player then
-                    pcall(function()
-                        SuspicionManager.Add(amount, player)
-                    end)
-                end
-            end
-            pendingSuspicion[userId] = 0
-        end
-    end
-end)
 
 local function getSuspicion(player)
     if not player then
@@ -389,7 +371,7 @@ local function updateTracking(state, now, dt)
 
     if canSeePlayer(state, root) and now >= state.nextSuspicionTick then
         triggerCameraLesson(state.targetPlayer)
-        addPendingSuspicion(state.targetPlayer, SUSPICION_PER_TICK)
+        addLineOfSightSuspicion(state.targetPlayer, SUSPICION_PER_TICK)
         state.nextSuspicionTick = now + SUSPICION_TICK_RATE
     end
 
@@ -447,7 +429,7 @@ while true do
 
                     if now >= state.nextSuspicionTick and canSeePlayer(state, root) then
                         triggerCameraLesson(player)
-                        addPendingSuspicion(player, SUSPICION_PER_TICK)
+                        addLineOfSightSuspicion(player, SUSPICION_PER_TICK)
                         state.nextSuspicionTick = now + SUSPICION_TICK_RATE
                     end
 

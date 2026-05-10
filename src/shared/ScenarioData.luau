@@ -11,6 +11,7 @@ local ScenarioData = {}
 ScenarioData.Chapter1_Recon = {
     type      = "terminal",
     title     = "Chapter 1: Active Reconnaissance",
+    kidDescription = "Look around a pretend network, spot safe clues, and learn how investigators find where data travels.",
     objective = "Run an authorized simulated recon workflow: discover lab hosts, capture realistic packet telemetry, and identify the admin network path.",
     welcomeMessage = [[
 ╔══════════════════════════════════════════════════╗
@@ -111,6 +112,7 @@ Type  help  to see available commands.
 ScenarioData.Chapter2_SSH = {
     type      = "terminal",
     title     = "Chapter 2: SSH and Log Analysis",
+    kidDescription = "Use a training login to read server files and learn how logs can explain what happened.",
         objective = "Access the PlayerData_Vault server, verify admin access from a recovered sticky-note credential, and find evidence of the attacker.",
     welcomeMessage = [[
 ╔══════════════════════════════════════════════════╗
@@ -236,6 +238,7 @@ Server report (SIM)
 ScenarioData.Chapter3_Malware = {
     type      = "terminal",
     title     = "Chapter 3: Malware Discovery",
+    kidDescription = "Study clues from a pretend harmful program and learn how defenders figure out what changed.",
     objective = "Find the malware, identify data exfiltration, and trace the attacker's server.",
     welcomeMessage = [[
 ╔══════════════════════════════════════════════════╗
@@ -327,6 +330,7 @@ tcp  0  0  192.168.43.20:3306 192.168.43.25:54011   TIME_WAIT
 ScenarioData.Chapter4_IncidentResponse = {
     type      = "terminal",
     title     = "Chapter 4: Incident Response",
+    kidDescription = "Block the problem, clean up safely, and write a clear report about what you found.",
     objective = "Stop the attacker, remove the malware, and harden the system.",
     welcomeMessage = [[
 ╔══════════════════════════════════════════════════╗

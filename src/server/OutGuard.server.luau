@@ -51,7 +51,7 @@ local PATROL_PAUSE_DURATION = 0
 local MOVE_TARGET_EPSILON = 2
 
 -- Suspicion tuning (Outside)
-local SUSPICION_PER_TICK = 1.2
+local SUSPICION_PER_TICK = 0.9
 local SUSPICION_TICK_RATE = 0.35
 
 -- Distraction tuning
@@ -98,44 +98,13 @@ local GIVE_UP_LINES = {
     "Back to my route.",
 }
 
--- === SUSPICION THROTTLE/BATCH ===
-local SUSPICION_PUSH_INTERVAL = 0.5
-local pendingSuspicion = {}
-
-local function queueSuspicion(player, amount)
+local function addLineOfSightSuspicion(player, amount)
     if not player or not player.UserId then
         return
     end
 
-    SuspicionManager.Add(amount or 0, player)
+    SuspicionManager.AddLineOfSight(amount or 0, player)
 end
-
-local function flushSuspicion(player)
-    if not player or not player.UserId then
-        return
-    end
-
-    local uid = player.UserId
-    local delta = pendingSuspicion[uid] or 0
-    if delta > 0 then
-        SuspicionManager.Add(delta, player)
-        pendingSuspicion[uid] = 0
-    end
-end
-
-task.spawn(function()
-    while task.wait(SUSPICION_PUSH_INTERVAL) do
-        for uid, delta in pairs(pendingSuspicion) do
-            if delta and delta > 0 then
-                local ply = Players:GetPlayerByUserId(uid)
-                if ply then
-                    SuspicionManager.Add(delta, ply)
-                end
-                pendingSuspicion[uid] = 0
-            end
-        end
-    end
-end)
 
 -- === ANIMATIONS ===
 local WALK_ANIM_ID = "http://www.roblox.com/asset/?id=913402848"
@@ -214,10 +183,6 @@ local function issueMoveTo(position)
 end
 
 local function clearActiveTarget(flushPending)
-    if flushPending and activeTarget then
-        flushSuspicion(activeTarget)
-    end
-
     activeTarget = nil
     lostSightSince = nil
     nextSuspicionTick = 0
@@ -561,7 +526,7 @@ local function updateChaseState(now)
     issueMoveTo(targetHRP.Position)
 
     if now >= nextSuspicionTick then
-        queueSuspicion(target, SUSPICION_PER_TICK)
+        addLineOfSightSuspicion(target, SUSPICION_PER_TICK)
         nextSuspicionTick = now + SUSPICION_TICK_RATE
     end
 end

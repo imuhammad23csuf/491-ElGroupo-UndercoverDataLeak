@@ -25,6 +25,8 @@ local activePopup = nil
 local RESTORE_STATE_ATTRIBUTE = "HackTabletRestoreBlob"
 local LOAD_SCENARIO_REMOTE_NAME = "LoadScenario"
 local LOAD_REMOTE_NAME = "LoadSavedProgress"
+local FLUSH_PROGRESS_REMOTE_NAME = "FlushProgress"
+local GET_SESSION_INFO_REMOTE_NAME = "GetSessionInfo"
 local SAVE_STATUS_REMOTE_NAME = "GetSavedProgressStatus"
 local CLEAR_SAVE_REMOTE_NAME = "ClearSavedProgress"
 local START_OVER_REMOTE_NAME = "StartOverProgress"
@@ -32,27 +34,23 @@ local CLEANUP_REMOTE_NAME = "Cleanup"
 local NEWS_CUTSCENE_REMOTE_NAME = "StartNewsCutscene"
 local NEWS_CUTSCENE_STARTED_ATTRIBUTE = "NewsCutsceneStarted"
 local NEWS_CUTSCENE_COMPLETED_ATTRIBUTE = "NewsCutsceneCompleted"
+local PHONE_INTRO_COMPLETED_ATTRIBUTE = "PhoneIntroCallCompleted"
 local NEWS_CUTSCENE_TIMEOUT = 75
+local MISSION_TIMER_REMOTES_NAME = "MissionTimerRemotes"
+local GET_TIMER_STATE_REMOTE_NAME = "GetTimerState"
 local DISCLAIMER_REMOTE_NAME = "DisclaimerCompleted"
-local DISCLAIMER_AUDIO_ID = "rbxassetid://104592562370100"
-local DISCLAIMER_AUDIO_FALLBACK_DURATION = 28
 local SCENARIO_ORDER = {
 	"Chapter1_Recon",
 	"Chapter2_SSH",
 	"Chapter3_Malware",
 	"Chapter4_IncidentResponse",
 }
-
-local DISCLAIMER_TEXT = [[CYBERSECURITY TRAINING SIMULATION
-
-This experience contains simulated systems and scenarios designed for educational purposes only.
-
-All activities in this game are fictional. Do not attempt to access, test, or interfere with real accounts or systems.
-
-Unauthorized access to real systems is illegal.
-
-Cybersecurity professionals always obtain permission before testing systems and use their skills to protect and defend.
-]]
+local CHAPTER_DESCRIPTIONS = {
+	Chapter1_Recon = "Look around a pretend network, spot safe clues, and learn how investigators find where data travels.",
+	Chapter2_SSH = "Use a training login to read server files and learn how logs can explain what happened.",
+	Chapter3_Malware = "Study clues from a pretend harmful program and learn how defenders figure out what changed.",
+	Chapter4_IncidentResponse = "Block the problem, clean up safely, and write a clear report about what you found.",
+}
 
 ---------------------------------------------------------
 -- COLOR & DESIGN TOKENS
@@ -789,21 +787,15 @@ local function showTrainingDisclaimer(onComplete)
 		BorderSizePixel = 0,
 	})
 	roundCorners(textGlow, 999)
-	TweenService:Create(textGlow, TweenInfo.new(8.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-		Position = UDim2.new(0.5, 0, 1, -40),
-		BackgroundTransparency = 0.9,
-	}):Play()
 
 	local paragraphTexts = {
-		"This experience contains simulated systems and scenarios designed for educational purposes only.",
-		"All activities in this game are fictional. Do not attempt to access, test, or interfere with real accounts or systems.",
-		"Unauthorized access to real systems is illegal.",
-		"Cybersecurity professionals always obtain permission before testing systems and use their skills to protect and defend.",
+		"This is a pretend cybersecurity training game.",
+		"The computers, accounts, networks, and clues here are fictional and only work inside this experience.",
+		"Do not try these actions on real websites, accounts, networks, or devices.",
+		"Real cybersecurity helpers always get permission first and use their skills to protect people.",
 	}
-	local paragraphDelays = { 1.6, 7.4, 14.6, 19.4 }
-	local paragraphLabels = {}
 	for index, paragraph in ipairs(paragraphTexts) do
-		local label = createLabel({
+		createLabel({
 			parent = textFrame,
 			BackgroundTransparency = 1,
 			Position = UDim2.new(0, 20, 0, 18 + ((index - 1) * 72)),
@@ -815,22 +807,17 @@ local function showTrainingDisclaimer(onComplete)
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
-			TextTransparency = 1,
+			TextTransparency = 0,
 		})
 		local accent = createFrame({
 			parent = textFrame,
-			Size = UDim2.new(0, 0, 0, 2),
+			Size = UDim2.new(0, 84, 0, 2),
 			Position = UDim2.new(0, 20, 0, 18 + ((index - 1) * 72) - 8),
 			BackgroundColor3 = index == 3 and Color3.fromRGB(248, 113, 113) or Color3.fromRGB(56, 189, 248),
 			BackgroundTransparency = 0.2,
 			BorderSizePixel = 0,
 		})
 		roundCorners(accent, 999)
-		paragraphLabels[#paragraphLabels + 1] = {
-			label = label,
-			accent = accent,
-			delay = paragraphDelays[index],
-		}
 	end
 
 	local footerLabel = createLabel({
@@ -838,7 +825,7 @@ local function showTrainingDisclaimer(onComplete)
 		BackgroundTransparency = 1,
 		Position = UDim2.new(0, 34, 1, -58),
 		Size = UDim2.new(1, -68, 0, 24),
-		Text = "Voice briefing in progress...",
+		Text = "",
 		TextColor3 = Color3.fromRGB(148, 163, 184),
 		Font = Enum.Font.GothamSemibold,
 		TextSize = 13,
@@ -846,44 +833,27 @@ local function showTrainingDisclaimer(onComplete)
 		TextTransparency = 1,
 	})
 
-	local continuePrompt = createLabel({
+	local continuePrompt = createButton({
 		parent = cardInner,
-		BackgroundTransparency = 1,
-		Position = UDim2.new(0, 34, 1, -90),
-		Size = UDim2.new(1, -68, 0, 22),
-		Text = "PRESS ANY KEY OR CLICK ANYWHERE TO CONTINUE",
-		TextColor3 = Color3.fromRGB(125, 211, 252),
+		BackgroundColor3 = Color3.fromRGB(56, 189, 248),
+		BackgroundTransparency = 0,
+		BorderSizePixel = 0,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 1, -54),
+		Size = UDim2.new(0, 180, 0, 42),
+		Text = "I UNDERSTAND",
+		TextColor3 = Color3.fromRGB(8, 12, 20),
 		Font = Enum.Font.GothamBlack,
-		TextSize = 13,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		TextTransparency = 1,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTransparency = 0,
 	})
+	roundCorners(continuePrompt, 12)
+	animateButtonHover(continuePrompt, Color3.fromRGB(56, 189, 248), Color3.fromRGB(125, 211, 252))
 
-	local disclaimerAudio = SoundService:FindFirstChild("TrainingDisclaimerAudio")
-	if disclaimerAudio then
-		disclaimerAudio:Destroy()
-	end
-	disclaimerAudio = Instance.new("Sound")
-	disclaimerAudio.Name = "TrainingDisclaimerAudio"
-	disclaimerAudio.SoundId = DISCLAIMER_AUDIO_ID
-	disclaimerAudio.Volume = 0.65
-	disclaimerAudio.Looped = false
-	disclaimerAudio.Parent = SoundService
-
-	local readyToDismiss = false
+	local readyToDismiss = true
 	local dismissed = false
 	local inputConnection = nil
-
-	local function unlockContinue()
-		if readyToDismiss then
-			return
-		end
-		readyToDismiss = true
-		footerLabel.Text = "Voice briefing complete."
-		TweenService:Create(continuePrompt, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
-		TweenService:Create(footerLabel, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0.18 }):Play()
-		TweenService:Create(continuePrompt, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { TextTransparency = 0.35 }):Play()
-	end
 
 	local function dismiss()
 		if dismissed or not readyToDismiss then
@@ -901,17 +871,18 @@ local function showTrainingDisclaimer(onComplete)
 				completedRemote:FireServer()
 			end
 		end
-		if disclaimerAudio and disclaimerAudio.Parent then
-			disclaimerAudio:Stop()
-			disclaimerAudio:Destroy()
-		end
 		TweenService:Create(root, TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { BackgroundTransparency = 1 }):Play()
 		TweenService:Create(card, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
 			BackgroundTransparency = 1,
 			Position = UDim2.new(0.5, 0, 0.48, 0),
 		}):Play()
 		for _, descendant in ipairs(card:GetDescendants()) do
-			if descendant:IsA("TextLabel") then
+			if descendant:IsA("TextButton") then
+				TweenService:Create(descendant, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+					BackgroundTransparency = 1,
+					TextTransparency = 1,
+				}):Play()
+			elseif descendant:IsA("TextLabel") then
 				TweenService:Create(descendant, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { TextTransparency = 1 }):Play()
 			elseif descendant:IsA("Frame") then
 				TweenService:Create(descendant, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
@@ -935,6 +906,8 @@ local function showTrainingDisclaimer(onComplete)
 		end
 	end)
 
+	continuePrompt.MouseButton1Click:Connect(dismiss)
+
 	inputConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if gameProcessed then
 			return
@@ -946,10 +919,6 @@ local function showTrainingDisclaimer(onComplete)
 		end
 	end)
 
-	disclaimerAudio.Ended:Connect(unlockContinue)
-	task.delay(DISCLAIMER_AUDIO_FALLBACK_DURATION + 0.5, unlockContinue)
-	disclaimerAudio:Play()
-
 	task.spawn(function()
 		TweenService:Create(card, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 			BackgroundTransparency = 0.02,
@@ -959,15 +928,6 @@ local function showTrainingDisclaimer(onComplete)
 		TweenService:Create(title, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
 		TweenService:Create(divider, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, 180, 0, 2) }):Play()
 		TweenService:Create(footerLabel, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0.18 }):Play()
-		for _, entry in ipairs(paragraphLabels) do
-			task.delay(entry.delay, function()
-				if dismissed then
-					return
-				end
-				TweenService:Create(entry.label, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { TextTransparency = 0 }):Play()
-				TweenService:Create(entry.accent, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(0, 84, 0, 2) }):Play()
-			end)
-		end
 	end)
 end
 
@@ -1177,6 +1137,44 @@ local function refreshContinueButtonState()
 	end
 end
 
+local function getMissionTimerState()
+	local timerRemotes = ReplicatedStorage:FindFirstChild(MISSION_TIMER_REMOTES_NAME)
+	local getTimerState = timerRemotes and timerRemotes:FindFirstChild(GET_TIMER_STATE_REMOTE_NAME)
+	if not getTimerState or not getTimerState:IsA("RemoteFunction") then
+		return nil
+	end
+
+	local ok, state = pcall(function()
+		return getTimerState:InvokeServer()
+	end)
+
+	if ok and type(state) == "table" then
+		return state
+	end
+
+	return nil
+end
+
+local function canContinueFromTitleScreen()
+	local sessionRemote = getRemoteFunction(GET_SESSION_INFO_REMOTE_NAME)
+	if sessionRemote then
+		local ok, sessionInfo = pcall(function()
+			return sessionRemote:InvokeServer()
+		end)
+
+		if ok and type(sessionInfo) == "table" then
+			return false, "Continue is disabled while a mission is already loaded."
+		end
+	end
+
+	local timerState = getMissionTimerState()
+	if type(timerState) == "table" and timerState.running == true then
+		return false, "Continue is disabled while the mission timer is running."
+	end
+
+	return true
+end
+
 ---------------------------------------------------------
 -- POPUP CREATOR
 ---------------------------------------------------------
@@ -1295,15 +1293,28 @@ end
 ---------------------------------------------------------
 -- BUTTON EVENTS
 ---------------------------------------------------------
+local function getChapterDescription(chapterId, chapter)
+	if type(chapter) == "table" then
+		local text = chapter.description or chapter.kidDescription or chapter.summary or chapter.objective
+		if type(text) == "string" and text ~= "" then
+			return text
+		end
+	end
+
+	return CHAPTER_DESCRIPTIONS[tostring(chapterId or "")] or "Learn a safe cybersecurity skill in a pretend training mission."
+end
+
 local function getChapterPopupData()
 	local objectiveChapters = ObjectiveManager and ObjectiveManager.Get("ChapterObjectives") or nil
 	if type(objectiveChapters) == "table" and #objectiveChapters > 0 then
 		local chapters = {}
 		for index, chapter in ipairs(objectiveChapters) do
 			if type(chapter) == "table" then
+				local chapterId = tostring(chapter.id or SCENARIO_ORDER[index] or "Chapter1_Recon")
 				chapters[#chapters + 1] = {
-					id = tostring(chapter.id or SCENARIO_ORDER[index] or "Chapter1_Recon"),
+					id = chapterId,
 					name = tostring(chapter.title or chapter.text or ("Chapter " .. index)),
+					description = getChapterDescription(chapterId, chapter),
 					number = index,
 					locked = chapter.unlocked == false or tostring(chapter.status or "") == "Locked",
 					status = tostring(chapter.status or "Not Started"),
@@ -1316,10 +1327,10 @@ local function getChapterPopupData()
 	end
 
 	return {
-		{ id = "Chapter1_Recon", name = "Chapter 1: Active Reconnaissance", number = 1, locked = false, status = "In Progress" },
-		{ id = "Chapter2_SSH", name = "Chapter 2: File System Forensics", number = 2, locked = true, status = "Locked" },
-		{ id = "Chapter3_Malware", name = "Chapter 3: Malware Discovery", number = 3, locked = true, status = "Locked" },
-		{ id = "Chapter4_IncidentResponse", name = "Chapter 4: Incident Response", number = 4, locked = true, status = "Locked" },
+		{ id = "Chapter1_Recon", name = "Chapter 1: Active Reconnaissance", description = getChapterDescription("Chapter1_Recon"), number = 1, locked = false, status = "In Progress" },
+		{ id = "Chapter2_SSH", name = "Chapter 2: File System Forensics", description = getChapterDescription("Chapter2_SSH"), number = 2, locked = true, status = "Locked" },
+		{ id = "Chapter3_Malware", name = "Chapter 3: Malware Discovery", description = getChapterDescription("Chapter3_Malware"), number = 3, locked = true, status = "Locked" },
+		{ id = "Chapter4_IncidentResponse", name = "Chapter 4: Incident Response", description = getChapterDescription("Chapter4_IncidentResponse"), number = 4, locked = true, status = "Locked" },
 	}
 end
 
@@ -1336,6 +1347,40 @@ end
 
 local missionStartInProgress = false
 local newsCutsceneRequestedThisSession = false
+
+local function hideNewsCutsceneModel()
+	local rootModel = Workspace:FindFirstChild("News") or Workspace:FindFirstChild("News", true)
+	if not rootModel then
+		local rig = Workspace:FindFirstChild("NewsAgent") or Workspace:FindFirstChild("NewsAgent", true)
+		if rig then
+			rootModel = rig.Parent and rig.Parent ~= Workspace and rig.Parent or rig
+		end
+	end
+
+	if not rootModel then
+		return
+	end
+
+	for _, descendant in ipairs(rootModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.CastShadow = false
+			descendant.Transparency = 1
+		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+			descendant.Transparency = 1
+		end
+	end
+end
+
+local function skipNewsCutsceneForContinue()
+	newsCutsceneRequestedThisSession = true
+	player:SetAttribute(PHONE_INTRO_COMPLETED_ATTRIBUTE, true)
+	player:SetAttribute(NEWS_CUTSCENE_STARTED_ATTRIBUTE, false)
+	player:SetAttribute(NEWS_CUTSCENE_COMPLETED_ATTRIBUTE, true)
+	hideNewsCutsceneModel()
+end
 
 local function playNewsCutsceneBeforeMission()
 	if newsCutsceneRequestedThisSession
@@ -1424,6 +1469,12 @@ loadProgressBtn.MouseButton1Click:Connect(function()
 		return
 	end
 
+	local canContinue, continueMessage = canContinueFromTitleScreen()
+	if not canContinue then
+		notify("UNDERCOVER", continueMessage, 3)
+		return
+	end
+
 	local loadRemote = getRemoteFunction(LOAD_REMOTE_NAME)
 	if not loadRemote then
 		notify("UNDERCOVER", "Continue is unavailable right now.", 3)
@@ -1449,6 +1500,7 @@ loadProgressBtn.MouseButton1Click:Connect(function()
 		return
 	end
 
+	skipNewsCutsceneForContinue()
 	setContinueButtonState(true)
 	loadProgressBtn.Text = originalText
 
@@ -1576,7 +1628,7 @@ chaptersBtn.MouseButton1Click:Connect(function()
 	for _, chapterData in ipairs(chapters) do
 		local chapterBtn = createButton({
 			parent = scrollFrame,
-			Size = UDim2.new(1, 0, 0, 72),
+			Size = UDim2.new(1, 0, 0, 96),
 			BackgroundColor3 = chapterData.locked and COLORS.DISABLED or COLORS.PRIMARY,
 			BorderSizePixel = 0,
 			Text = "",
@@ -1589,14 +1641,30 @@ chaptersBtn.MouseButton1Click:Connect(function()
 		createLabel({
 			parent = chapterBtn,
 			Text = chapterData.name,
-			Size = UDim2.new(1, -110, 1, 0),
-			Position = UDim2.new(0, 16, 0, 0),
+			Size = UDim2.new(1, -124, 0, 24),
+			Position = UDim2.new(0, 16, 0, 16),
 			BackgroundTransparency = 1,
 			TextColor3 = chapterData.locked and COLORS.TEXT_PRIMARY or COLORS.DARK_BG,
 			Font = Enum.Font.GothamSemibold,
 			TextSize = 16,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Center,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = 86,
+		})
+
+		createLabel({
+			parent = chapterBtn,
+			Text = tostring(chapterData.description or ""),
+			Size = UDim2.new(1, -124, 0, 40),
+			Position = UDim2.new(0, 16, 0, 42),
+			BackgroundTransparency = 1,
+			TextColor3 = chapterData.locked and COLORS.TEXT_SECONDARY or Color3.fromRGB(15, 23, 42),
+			Font = Enum.Font.GothamMedium,
+			TextSize = 12,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
 			ZIndex = 86,
 		})
 
@@ -1782,7 +1850,26 @@ end
 local backToMenuBtn = nil
 local fallbackBackGui = nil
 
+local function flushProgressBeforeMenu()
+	local flushRemote = getRemoteFunction(FLUSH_PROGRESS_REMOTE_NAME)
+	if not flushRemote then
+		return
+	end
+
+	local ok, result = pcall(function()
+		return flushRemote:InvokeServer()
+	end)
+
+	if not ok then
+		warn("[ModernTitleScreen] Progress flush before menu failed:", result)
+	elseif type(result) == "table" and result.success ~= true and type(result.warning) == "string" then
+		warn("[ModernTitleScreen] Progress flush before menu warning:", result.warning)
+	end
+end
+
 local function fireBackToMenuCleanup()
+	flushProgressBeforeMenu()
+
 	local remotes = getRemotesFolder()
 	local cleanupRemote = remotes and remotes:FindFirstChild(CLEANUP_REMOTE_NAME)
 	if cleanupRemote and cleanupRemote:IsA("RemoteEvent") then

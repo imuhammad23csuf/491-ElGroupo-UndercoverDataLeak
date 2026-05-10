@@ -131,6 +131,21 @@ local Scale = Instance.new("UIScale")
 Scale.Scale = 1
 Scale.Parent = Panel
 
+local function clearLegacyAgentDialogueGuis()
+	for _, child in ipairs(PlayerGui:GetChildren()) do
+		if child ~= Gui and child:IsA("ScreenGui") then
+			local name = string.lower(child.Name)
+			local isLegacyDialogue = name == "dialoguegui"
+				or name == "npcdialoguegui"
+				or (string.find(name, "dialogue") and (string.find(name, "agent") or string.find(name, "cafe")))
+
+			if isLegacyDialogue then
+				child:Destroy()
+			end
+		end
+	end
+end
+
 local function updateScale()
 	local camera = workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
@@ -143,6 +158,7 @@ if workspace.CurrentCamera then
 end
 
 local function showGui()
+	clearLegacyAgentDialogueGuis()
 	Gui.Enabled = true
 	Shade.BackgroundTransparency = 1
 	Panel.BackgroundTransparency = 1
@@ -241,6 +257,7 @@ local function startDialogue(token, lines)
 		DialogueRemote:FireServer("Cancel", activeToken)
 	end
 
+	clearLegacyAgentDialogueGuis()
 	activeToken = token
 	activeLines = {}
 	currentIndex = 1

@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 local PHONE_NAME = "Phone"
 local CLICK_DETECTOR_NAME = "PhoneClickDetector"
 local REMOTE_NAME = "PhoneCallRequested"
+local PHONE_INTRO_COMPLETED_ATTRIBUTE = "PhoneIntroCallCompleted"
 local MAX_ACTIVATION_DISTANCE = 24
 local PHONE_SEARCH_INTERVAL = 1
 
@@ -14,6 +15,12 @@ if not phoneCallRequested then
 	phoneCallRequested.Name = REMOTE_NAME
 	phoneCallRequested.Parent = ReplicatedStorage
 end
+
+phoneCallRequested.OnServerEvent:Connect(function(player, action)
+	if action == "Complete" and player and player.Parent == Players then
+		player:SetAttribute(PHONE_INTRO_COMPLETED_ATTRIBUTE, true)
+	end
+end)
 
 local connectedDetectors = {}
 local detectorPhones = {}

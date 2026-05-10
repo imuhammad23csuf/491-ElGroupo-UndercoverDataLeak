@@ -64,6 +64,7 @@ local pendingGrantTokensByUserId = {}
 local pendingGrantPromptsByUserId = {}
 local delayedPendingToolChecksByUserId = {}
 local grantHandoffUntilByUserId = {}
+local restoringGrantedToolsByUserId = {}
 
 local dialogueRemote = ReplicatedStorage:FindFirstChild(DIALOGUE_REMOTE_NAME)
 if not dialogueRemote then
@@ -313,9 +314,34 @@ local function handleAgentVisit(player)
 	end
 end
 
+local function ensureGrantedTools(player)
+	if not player or player.Parent ~= Players or not isAgentRayToolAllowed(player) then
+		return
+	end
+
+	local userId = player.UserId
+	if restoringGrantedToolsByUserId[userId] then
+		return
+	end
+
+	restoringGrantedToolsByUserId[userId] = true
+	openGrantHandoffWindow(player)
+	player:SetAttribute(TOOLS_RECEIVED_ATTRIBUTE, true)
+	player:SetAttribute("HasSpokenToAgentRay", true)
+	player:SetAttribute("AgentRayDialogueActive", false)
+	player:SetAttribute("AgentRayDialogueComplete", true)
+
+	for _, toolName in ipairs(TOOL_NAMES) do
+		grantTool(player, toolName)
+	end
+
+	restoringGrantedToolsByUserId[userId] = nil
+end
+
 _G.AgentRayToolGiver = {
 	GrantTools = handleAgentVisit,
 	GiveTools = handleAgentVisit,
+	EnsureTools = ensureGrantedTools,
 }
 
 local function getAgentDialogueDelay()
@@ -538,32 +564,43 @@ local function attachToAgent(instance)
 		end)
 	end
 
-	local foundDialoguePrompt = false
+	local prompt = part:FindFirstChild(PROMPT_NAME)
 	for _, descendant in ipairs(instance:GetDescendants()) do
 		if descendant:IsA("ProximityPrompt") then
-			foundDialoguePrompt = true
-			connectPrompt(descendant)
+			if descendant.Name == PROMPT_NAME then
+				prompt = descendant
+			else
+				descendant:Destroy()
+			end
 		end
 	end
 
-	local prompt = part:FindFirstChild(PROMPT_NAME)
-	if not foundDialoguePrompt and not prompt then
+	if prompt and not prompt:IsA("ProximityPrompt") then
+		prompt:Destroy()
+		prompt = nil
+	end
+
+	if not prompt then
 		prompt = Instance.new("ProximityPrompt")
 		prompt.Name = PROMPT_NAME
-		prompt.ActionText = "Talk"
-		prompt.ObjectText = "Agent Ray"
-		prompt.HoldDuration = 0
-		prompt.MaxActivationDistance = 12
-		prompt.RequiresLineOfSight = false
 		prompt.Parent = part
 	end
 
-	if prompt then
-		connectPrompt(prompt)
-	end
+	prompt.Name = PROMPT_NAME
+	prompt.ActionText = "Talk"
+	prompt.ObjectText = "Agent Ray"
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	connectPrompt(prompt)
 
 	instance.DescendantAdded:Connect(function(descendant)
 		if descendant:IsA("ProximityPrompt") then
+			if descendant.Name ~= PROMPT_NAME then
+				descendant:Destroy()
+				return
+			end
+
 			connectPrompt(descendant)
 		end
 	end)
@@ -598,11 +635,19 @@ local function connectPlayer(player)
 	playerConnections[player.UserId] = {}
 
 	table.insert(playerConnections[player.UserId], player:GetAttributeChangedSignal("HasSpokenToAgentRay"):Connect(function()
-		removeToolsIfReceiptWasCleared(player)
+		if isAgentRayToolAllowed(player) then
+			task.defer(ensureGrantedTools, player)
+		else
+			removeToolsIfReceiptWasCleared(player)
+		end
 	end))
 
 	table.insert(playerConnections[player.UserId], player:GetAttributeChangedSignal(TOOLS_RECEIVED_ATTRIBUTE):Connect(function()
-		removeToolsIfReceiptWasCleared(player)
+		if isAgentRayToolAllowed(player) then
+			task.defer(ensureGrantedTools, player)
+		else
+			removeToolsIfReceiptWasCleared(player)
+		end
 	end))
 
 	local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
@@ -611,14 +656,22 @@ local function connectPlayer(player)
 
 	table.insert(playerConnections[player.UserId], player.CharacterAdded:Connect(function(character)
 		watchPlayerContainer(player, character)
-		task.defer(enforceNoToolsBeforeVisit, player)
+		if isAgentRayToolAllowed(player) then
+			task.defer(ensureGrantedTools, player)
+		else
+			task.defer(enforceNoToolsBeforeVisit, player)
+		end
 	end))
 
 	if player.Character then
 		watchPlayerContainer(player, player.Character)
 	end
 
-	task.defer(enforceNoToolsBeforeVisit, player)
+	if isAgentRayToolAllowed(player) then
+		task.defer(ensureGrantedTools, player)
+	else
+		task.defer(enforceNoToolsBeforeVisit, player)
+	end
 end
 
 local function disconnectPlayer(player)
@@ -634,6 +687,7 @@ local function disconnectPlayer(player)
 	pendingGrantPromptsByUserId[player.UserId] = nil
 	delayedPendingToolChecksByUserId[player.UserId] = nil
 	grantHandoffUntilByUserId[player.UserId] = nil
+	restoringGrantedToolsByUserId[player.UserId] = nil
 end
 
 for _, descendant in ipairs(Workspace:GetDescendants()) do

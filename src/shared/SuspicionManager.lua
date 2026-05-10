@@ -309,6 +309,27 @@ function SuspicionManager.Add(amount, player)
 	end
 end
 
+function SuspicionManager.AddLineOfSight(amount, player)
+	local delta = clampDelta(amount)
+	if delta <= 0 then
+		return
+	end
+
+	if RunService:IsServer() then
+		-- Vision sources should not use the delayed queue: old queued points can
+		-- keep raising suspicion after the guard/camera no longer has LOS.
+		if player then
+			applyServerDelta(player, delta)
+		else
+			for _, candidate in ipairs(Players:GetPlayers()) do
+				applyServerDelta(candidate, delta)
+			end
+		end
+	else
+		debugLog("Rejected client attempt to add line-of-sight suspicion directly.")
+	end
+end
+
 function SuspicionManager.Reduce(amount, player)
 	local delta = clampDelta(amount)
 	if delta <= 0 then

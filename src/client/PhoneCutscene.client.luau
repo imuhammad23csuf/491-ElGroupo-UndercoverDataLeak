@@ -17,7 +17,14 @@ local Camera = Workspace.CurrentCamera
 local TypingSpeed = 0.018
 local FadeUI = 0.2
 local PHONE_CALL_REMOTE_NAME = "PhoneCallRequested"
+local PHONE_INTRO_COMPLETED_ATTRIBUTE = "PhoneIntroCallCompleted"
 local AdvanceKeys = { Enum.KeyCode.E, Enum.KeyCode.Space, Enum.KeyCode.Return, Enum.KeyCode.ButtonA }
+local INTRO_COMPLETE_ATTRIBUTES = {
+	PHONE_INTRO_COMPLETED_ATTRIBUTE,
+	"HasSpokenToAgentRay",
+	"AgentRayToolsReceived",
+	"AgentRayDialogueSeen",
+}
 
 local NewsReady = false
 local maybeStartRinging
@@ -37,6 +44,20 @@ end)
 
 local function hasNewsFinished()
 	return NewsReady
+end
+
+local function hasPhoneIntroFinished()
+	for _, attributeName in ipairs(INTRO_COMPLETE_ATTRIBUTES) do
+		if Player:GetAttribute(attributeName) == true then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function shouldPhoneIntroPlay()
+	return hasNewsFinished() and not hasPhoneIntroFinished()
 end
 
 local SpawnCF
@@ -618,6 +639,14 @@ local function stopRinging()
 	end
 end
 
+for _, attributeName in ipairs(INTRO_COMPLETE_ATTRIBUTES) do
+	Player:GetAttributeChangedSignal(attributeName):Connect(function()
+		if hasPhoneIntroFinished() then
+			stopRinging()
+		end
+	end)
+end
+
 local function startPhoneAnimation()
 	PhoneAnimationToken = PhoneAnimationToken + 1
 	local token = PhoneAnimationToken
@@ -665,7 +694,7 @@ local function startPhoneAnimation()
 end
 
 local function startRinging()
-	if Ringing or not hasNewsFinished() then
+	if Ringing or not shouldPhoneIntroPlay() then
 		return
 	end
 
@@ -744,7 +773,7 @@ end
 
 maybeStartRinging = startRinging
 
-if hasNewsFinished() then
+if shouldPhoneIntroPlay() then
 	startRinging()
 end
 
@@ -814,7 +843,7 @@ local function startCallAnimation()
 end
 
 local function runCall(lines, callerName)
-	if InCall or not hasNewsFinished() then
+	if InCall or not shouldPhoneIntroPlay() then
 		return
 	end
 
@@ -881,6 +910,11 @@ local function runCall(lines, callerName)
 	UI.Hint.Text = ""
 	stopCallAnimation()
 	UI.Hide()
+	Player:SetAttribute(PHONE_INTRO_COMPLETED_ATTRIBUTE, true)
+	local phoneRemote = ReplicatedStorage:FindFirstChild(PHONE_CALL_REMOTE_NAME)
+	if phoneRemote and phoneRemote:IsA("RemoteEvent") then
+		phoneRemote:FireServer("Complete")
+	end
 
 	InCall = false
 end
@@ -889,7 +923,7 @@ local Debounce = false
 local connectedDetectors = {}
 
 local function requestPhoneCall()
-	if Debounce or InCall or not hasNewsFinished() then
+	if Debounce or InCall or not shouldPhoneIntroPlay() then
 		return
 	end
 

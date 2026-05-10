@@ -140,6 +140,7 @@ local function buildChapterObjectives(player)
                 id = scenarioId,
                 title = scenario.title,
                 text = scenario.title,
+                description = scenario.kidDescription or scenario.description or scenario.objective,
                 status = status,
                 unlocked = unlocked,
                 steps = steps,
@@ -317,6 +318,36 @@ local function cloneCompletedScenarios(source)
     end
 
     return out
+end
+
+local function hasCompletedScenario(source)
+    if type(source) ~= "table" then
+        return false
+    end
+
+    for _, completed in pairs(source) do
+        if completed == true then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function resolveNextScenarioAfterCompletedProgress(progressData)
+    progressData = type(progressData) == "table" and progressData or {}
+    local completed = type(progressData.completedScenarios) == "table" and progressData.completedScenarios or {}
+    local sawCompleted = false
+
+    for _, scenarioId in ipairs(scenarioOrder) do
+        if completed[scenarioId] == true then
+            sawCompleted = true
+        elseif sawCompleted then
+            return scenarioId
+        end
+    end
+
+    return nil
 end
 
 local function buildCompletedStepsForScenario(scenario, currentStep)
@@ -776,6 +807,26 @@ end
 
 function CyberScenarioManager.SyncObjectives(player)
     syncObjectives(player)
+end
+
+function CyberScenarioManager.HasProgressSnapshot(progressData)
+    if type(progressData) ~= "table" then
+        return false
+    end
+
+    local activeSession = type(progressData.activeSession) == "table" and progressData.activeSession or nil
+    if activeSession then
+        local scenarioId = tostring(activeSession.scenarioId or "")
+        if ScenarioData[scenarioId] then
+            return true
+        end
+    end
+
+    return hasCompletedScenario(progressData.completedScenarios)
+end
+
+function CyberScenarioManager.ResolveNextScenarioAfterCompletedProgress(progressData)
+    return resolveNextScenarioAfterCompletedProgress(progressData)
 end
 
 function CyberScenarioManager.ExportProgress(player)
